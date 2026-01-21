@@ -3,7 +3,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "dagster.fullname" $ -}}-{{- $deployment.name }}
+  name: {{ include "dagsterUserDeployments.userDeployment.name" (list $ $deployment) }}
   labels:
     {{- include "dagster.labels" $ | nindent 4 }}
     component: user-deployments
@@ -88,7 +88,7 @@ spec:
             - configMapRef:
                 name: {{ include "dagster.fullname" $ }}-user-deployments-shared-env
             - configMapRef:
-                name: {{ include "dagster.fullname" $ }}-{{ $deployment.name }}-user-env
+                name: {{ include "dagsterUserDeployments.userDeployment.name" (list $ $deployment) }}-user-env
             {{- range $envConfigMap := $deployment.envConfigMaps }}
             - configMapRef: {{- $envConfigMap | toYaml | nindent 16 }}
             {{- end }}

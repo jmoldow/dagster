@@ -117,6 +117,22 @@ app.kubernetes.io/name: {{ include "dagster.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "dagsterUserDeployments.userDeployment.name" -}}
+{{- $ := index . 0 -}}
+{{- with index . 1 }}
+{{- $deploymentName := .name -}}
+{{- $fullname := template "dagster.fullname" $ -}}
+{{- if and
+  (eq (len $.Values.deployments) 1)
+  (or ($fullname | hasPrefix (printf "%s-" $deploymentName)) ($fullname | hasSuffix (printf "-%s" $deploymentName)))
+}}
+{{ $fullname }}
+{{- else }}
+{{ $fullname -}}-{{- $deploymentName }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
 {{/*
 Create the name of the service account to use
 */}}
@@ -153,7 +169,7 @@ DAGSTER_K8S_PIPELINE_RUN_ENV_CONFIGMAP: "{{ template "dagster.fullname" . }}-pip
     image_pull_secrets: {{- $.Values.imagePullSecrets | toYaml | nindent 6 }}
     {{- end }}
     env_config_maps:
-    - {{ include "dagster.fullname" $ }}-{{ .name }}-user-env
+    - {{ include "dagsterUserDeployments.userDeployment.name" (list $ .) }}-user-env
     {{- range $envConfigMap := .envConfigMaps }}
     {{- if hasKey $envConfigMap "name" }}
     - {{ $envConfigMap.name }}
