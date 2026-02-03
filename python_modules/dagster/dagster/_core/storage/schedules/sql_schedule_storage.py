@@ -2,6 +2,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from functools import cache, cached_property
 from typing import Any, Callable, ContextManager, NamedTuple, TypeVar  # noqa: UP035
 
 import sqlalchemy as db
@@ -475,7 +476,7 @@ class SqlScheduleStorage(ScheduleStorage):
         with self.connect() as conn:
             conn.execute(query)
 
-    @property
+    @cached_property
     def supports_auto_materialize_asset_evaluations(self) -> bool:
         return self._has_asset_daemon_asset_evaluations_table()
 
@@ -589,6 +590,7 @@ class SqlScheduleStorage(ScheduleStorage):
         with self.connect() as conn:
             return "secondary_indexes" in db.inspect(conn).get_table_names()
 
+    @cache
     def has_built_index(self, migration_name: str) -> bool:
         if not self.has_secondary_index_table():
             return False

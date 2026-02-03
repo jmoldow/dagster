@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
+from functools import cache
 from typing import Any, Callable, ContextManager, NamedTuple, cast  # noqa: UP035
 
 import sqlalchemy as db
@@ -761,6 +762,7 @@ class SqlRunStorage(RunStorage):
     def optimize(self, print_fn: PrintFn | None = None, force_rebuild_all: bool = False) -> None:
         self._execute_data_migrations(OPTIONAL_DATA_MIGRATIONS, print_fn, force_rebuild_all)
 
+    @cache
     def has_built_index(self, migration_name: str) -> bool:
         query = (
             db_select([1])

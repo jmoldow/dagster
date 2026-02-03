@@ -5,7 +5,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from functools import cached_property
+from functools import cache, cached_property
 from typing import (  # noqa: UP035
     TYPE_CHECKING,
     AbstractSet,
@@ -233,11 +233,6 @@ class SqlEventLogStorage(EventLogStorage):
             "asset_key": asset_key_str,
             "partition": partition,
         }
-
-    def has_asset_key_col(self, column_name: str) -> bool:
-        with self.index_connection() as conn:
-            column_names = [x.get("name") for x in db.inspect(conn).get_columns(AssetKeyTable.name)]
-            return column_name in column_names
 
     @cached_if_true_no_arg_method
     def has_asset_key_index_cols(self) -> bool:
@@ -1241,6 +1236,12 @@ class SqlEventLogStorage(EventLogStorage):
     @cached_if_true_no_arg_method
     def can_write_asset_status_cache(self) -> bool:
         return self.has_asset_key_col("cached_status_data")
+
+    @cache
+    def has_asset_key_col(self, column_name: str) -> bool:
+        with self.index_connection() as conn:
+            column_names = [x.get("name") for x in db.inspect(conn).get_columns(AssetKeyTable.name)]
+            return column_name in column_names
 
     def wipe_asset_cached_status(self, asset_key: AssetKey) -> None:
         if self.can_read_asset_status_cache():
@@ -3389,8 +3390,8 @@ class SqlEventLogStorage(EventLogStorage):
             )
         return infos
 
-    @property
-    def supports_asset_checks(self):
+    @cached_property
+    def supports_asset_checks(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         return self.has_table(AssetCheckExecutionsTable.name)
 
     def get_latest_planned_materialization_info(

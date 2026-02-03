@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from functools import cached_property
+from functools import cache, cached_property
 from typing import TYPE_CHECKING, Any, ContextManager  # noqa: UP035
 
 import dagster_shared.seven as seven

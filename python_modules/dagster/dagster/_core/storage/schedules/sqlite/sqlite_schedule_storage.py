@@ -90,6 +90,7 @@ class SqliteScheduleStorage(SqlScheduleStorage, ConfigurableClass):
         if should_migrate_data:
             schedule_storage.migrate()
             schedule_storage.optimize()
+            schedule_storage = cls(conn_string, inst_data)
 
         return schedule_storage
 

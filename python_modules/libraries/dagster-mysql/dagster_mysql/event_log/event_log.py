@@ -1,3 +1,4 @@
+from functools import cache
 from typing import ContextManager, cast  # noqa: UP035
 
 import dagster._check as check

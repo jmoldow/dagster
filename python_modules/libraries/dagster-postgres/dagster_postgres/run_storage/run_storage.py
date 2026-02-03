@@ -175,7 +175,7 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
         with self.connect() as conn:
             run_alembic_upgrade(pg_alembic_config(__file__), conn)
 
-    def has_built_index(self, migration_name: str) -> bool:
+    def has_built_index(self, migration_name: str) -> bool:  # ty: ignore[invalid-method-override]
         if migration_name not in self._index_migration_cache:
             self._index_migration_cache[migration_name] = super().has_built_index(migration_name)
         return self._index_migration_cache[migration_name]

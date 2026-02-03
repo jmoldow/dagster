@@ -1,5 +1,6 @@
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from functools import cache
 from typing import TYPE_CHECKING, Any, ContextManager, cast  # noqa: UP035
 
 import dagster._check as check

@@ -3,7 +3,7 @@ import os
 from collections import defaultdict
 from collections.abc import Mapping
 from contextlib import contextmanager
-from functools import cached_property
+from functools import cache, cached_property
 from typing import Any
 
 import sqlalchemy as db
