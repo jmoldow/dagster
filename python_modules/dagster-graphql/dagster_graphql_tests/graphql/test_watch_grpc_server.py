@@ -2,7 +2,6 @@ import time
 from typing import Any
 
 from dagster._core.remote_representation.grpc_server_state_subscriber import (
-    LocationStateChangeEvent,
     LocationStateChangeEventType,
     LocationStateSubscriber,
 )
@@ -27,15 +26,24 @@ class TestSubscribeToGrpcServerEvents(BaseTestSuite):
         graphql_context.process_context.add_state_subscriber(test_subscriber)
         location.client.shutdown_server()
 
-        # Wait for event
+        # Wait for LOCATION_ERROR event. LOCATION_DISCONNECTED may arrive first since the
+        # watch thread detects the disconnect before exhausting reconnect attempts.
         start_time = time.time()
         timeout = 60
-        while not len(events) > 0:
+        while not any(e.event_type == LocationStateChangeEventType.LOCATION_ERROR for e in events):
             if time.time() - start_time > timeout:
-                raise Exception("Timed out waiting for LocationStateChangeEvent")
+                raise Exception("Timed out waiting for LOCATION_ERROR event")
             time.sleep(1)
 
-        assert len(events) == 1
-        assert isinstance(events[0], LocationStateChangeEvent)
-        assert events[0].event_type == LocationStateChangeEventType.LOCATION_ERROR
-        assert events[0].location_name == location.name
+        error_events = [
+            e for e in events if e.event_type == LocationStateChangeEventType.LOCATION_ERROR
+        ]
+        assert len(error_events) == 1
+        assert error_events[0].location_name == location.name
+
+        # LOCATION_DISCONNECTED should have arrived before LOCATION_ERROR
+        disconnect_events = [
+            e for e in events if e.event_type == LocationStateChangeEventType.LOCATION_DISCONNECTED
+        ]
+        assert len(disconnect_events) == 1
+        assert disconnect_events[0].location_name == location.name

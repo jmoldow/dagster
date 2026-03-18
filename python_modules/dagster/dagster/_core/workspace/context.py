@@ -1075,6 +1075,20 @@ class WorkspaceProcessContext(IWorkspaceProcessContext[WorkspaceRequestContext])
                     ),
                 )
             ),
+            on_disconnect=lambda location_name: self._send_state_event_to_subscribers(
+                LocationStateChangeEvent(
+                    LocationStateChangeEventType.LOCATION_DISCONNECTED,
+                    location_name=location_name,
+                    message="Disconnected from the server.",
+                )
+            ),
+            on_reconnected=lambda location_name: self._send_state_event_to_subscribers(
+                LocationStateChangeEvent(
+                    LocationStateChangeEventType.LOCATION_RECONNECTED,
+                    location_name=location_name,
+                    message="Reconnected to the server.",
+                )
+            ),
         )
         self._watch_thread_shutdown_events[location_name] = shutdown_event
         self._watch_threads[location_name] = watch_thread
@@ -1238,19 +1252,26 @@ class WorkspaceProcessContext(IWorkspaceProcessContext[WorkspaceRequestContext])
 
     def _location_state_events_handler(self, event: LocationStateChangeEvent) -> None:
         # If the server was updated or we were not able to reconnect, we immediately reload the
-        # location handle
-        if event.event_type in (
+        # location handle. Reconnect/disconnect events are logged but don't trigger a refresh.
+        logger = logging.getLogger("dagster-webserver")
+        refresh_event_types = (
             LocationStateChangeEventType.LOCATION_UPDATED,
             LocationStateChangeEventType.LOCATION_ERROR,
-        ):
+        )
+        is_important = event.event_type in refresh_event_types
+        log_fn = logger.info if is_important else logger.debug
+
+        if event.event_type in refresh_event_types:
             # In case of an updated location, reload the handle to get updated repository data and
             # re-attach a subscriber
             # In case of a location error, just reload the handle in order to update the workspace
             # with the correct error messages
-            logging.getLogger("dagster-webserver").info(
+            log_fn(
                 f"Received {event.event_type} event for location {event.location_name}, refreshing"
             )
             self.refresh_code_location(event.location_name)
+        else:
+            log_fn(f"Received {event.event_type} event for location {event.location_name}")
 
     def refresh_code_location(self, name: str) -> None:
         # This method reloads the webserver's copy of the code from the remote gRPC server without

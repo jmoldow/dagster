@@ -34,17 +34,22 @@ def watch_grpc_server_thread(
     are able to reconnect, there are two possibilities:
 
     a. The server ID has changed
-        -> In this case, we we call `on_updated` and end the thread.
+        -> In this case, we call `on_updated` and end the thread.
     b. The server ID is the same
-        -> In this case, we we call `on_reconnected`, and we go back to polling the server for
+        -> In this case, we call `on_reconnected`, and we go back to polling the server for
         changes.
 
     If we are unable to reconnect to the server within the specified max_reconnect_attempts, we
-    call on_error.
+    call on_error. After on_error, the reconnect loop continues indefinitely — the thread does
+    not shut down, so that if the server eventually comes back, it will be detected via
+    on_updated (not on_reconnected). This is intentional: on_error already notified subscribers
+    of the failure, so recovery must go through on_updated to trigger a refresh that clears the
+    error state. The stored server ID is cleared on error to ensure the on_updated path is
+    taken regardless of whether the actual server ID changed.
 
-    Once the on_updated or on_error events are called, this thread shuts down completely. These two
-    events are called at most once, while `on_disconnected` and `on_reconnected` may be called
-    multiple times in order to be properly handle intermittent network failures.
+    `on_updated` is called at most once and causes the thread to exit. `on_error` is called at
+    most once but does not cause the thread to exit. `on_disconnect` and `on_reconnected` may be
+    called multiple times to properly handle intermittent network failures.
     """
     check.str_param(location_name, "location_name")
     check.inst_param(client, "client", DagsterGrpcClient)
@@ -70,6 +75,9 @@ def watch_grpc_server_thread(
         server_id["error"] = False
 
     def set_error():
+        # Clearing current server ID ensures that post-error recovery always takes
+        # the on_updated path in reconnect_loop, which is needed to trigger a
+        # refresh that clears the error state in subscribers.
         server_id["current"] = None
         server_id["error"] = True
 
@@ -100,9 +108,12 @@ def watch_grpc_server_thread(
                 new_server_id = client.get_server_id(timeout=REQUEST_TIMEOUT)
                 if current_server_id() == new_server_id and not has_error():
                     # Intermittent failure, was able to reconnect to the same server
+                    # before max_reconnect_attempts was exhausted.
                     on_reconnected(location_name)
                     return
                 else:
+                    # Either the server ID changed, or we're recovering after on_error
+                    # was already called. Either way, on_updated triggers a refresh.
                     on_updated(location_name, new_server_id)
                     set_server_id(new_server_id)
                     return
@@ -112,6 +123,8 @@ def watch_grpc_server_thread(
             if attempts >= max_reconnect_attempts and not has_error():
                 on_error(location_name)
                 set_error()
+                # Intentionally does not return — the loop continues so that if the
+                # server eventually comes back, it will be detected via on_updated.
 
     while True:
         if shutdown_event.is_set():
