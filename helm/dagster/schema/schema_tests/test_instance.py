@@ -68,9 +68,9 @@ def helm_template() -> HelmTemplate:
 
 @pytest.mark.parametrize("postgresql_scheme", ["", "postgresql", "postgresql+psycopg2"])
 @pytest.mark.parametrize("storage", ["schedule_storage", "run_storage", "event_log_storage"])
-@pytest.mark.parametrize("connect_timeout", [0, 10, 15])
+@pytest.mark.parametrize("connect_timeout", [None, 0, 10, 15])
 def test_storage_postgres_db_config(
-    template: HelmTemplate, postgresql_scheme: str, storage: str, connect_timeout: int
+    template: HelmTemplate, postgresql_scheme: str, storage: str, connect_timeout: int | None
 ):
     postgresql_username = "username"
     postgresql_host = "1.1.1.1"
@@ -79,7 +79,7 @@ def test_storage_postgres_db_config(
         "application_name": "myapp",
         "options": "-c synchronous_commit=off",
     }
-    if connect_timeout:
+    if connect_timeout is not None:
         postgresql_params["connect_timeout"] = connect_timeout
     expected_postgresql_params = {
         **postgresql_params,
