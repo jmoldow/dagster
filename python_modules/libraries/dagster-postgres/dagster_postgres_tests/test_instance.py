@@ -248,7 +248,7 @@ def test_specify_pg_params(hostname):
     with instance_for_test(
         overrides=yaml.safe_load(params_specified_pg_config(hostname))
     ) as instance:
-        postgres_url = f"postgresql://test:test@{hostname}:5432/test?application_name=myapp&connect_timeout=10&options=-c%20synchronous_commit%3Doff"
+        postgres_url = f"postgresql://test:test@{hostname}:5432/test?application_name=myapp&connect_timeout=10&options=-c%20synchronous_commit%3Doff&fallback_application_name=dagster"
 
         assert instance._event_storage.postgres_url == postgres_url  # noqa: SLF001  # pyright: ignore[reportAttributeAccessIssue]
         assert instance._run_storage.postgres_url == postgres_url  # noqa: SLF001  # pyright: ignore[reportAttributeAccessIssue]
@@ -269,7 +269,10 @@ def test_conn_str():
         db_name=db_name,
         hostname=hostname,
     )
-    assert conn_str == f"postgresql://{url_wo_scheme}"
+    assert (
+        conn_str
+        == f"postgresql://{url_wo_scheme}?fallback_application_name=dagster&connect_timeout=15"
+    )
     parsed = urlparse(conn_str)
     assert unquote(parsed.username) == username  # pyright: ignore[reportArgumentType]
     assert unquote(parsed.password) == password  # pyright: ignore[reportArgumentType]
@@ -285,7 +288,10 @@ def test_conn_str():
         scheme=custom_scheme,
     )
 
-    assert conn_str == f"postgresql+dialect://{url_wo_scheme}"
+    assert (
+        conn_str
+        == f"postgresql+dialect://{url_wo_scheme}?fallback_application_name=dagster&connect_timeout=15"
+    )
     parsed = urlparse(conn_str)
     assert unquote(parsed.username) == username  # pyright: ignore[reportArgumentType]
     assert unquote(parsed.password) == password  # pyright: ignore[reportArgumentType]
