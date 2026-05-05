@@ -89,7 +89,7 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     ):
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
         self.postgres_url = check.str_param(postgres_url, "postgres_url")
-        self.should_autocreate_tables = check.bool_param(
+        self.should_autocreate_tables: bool = check.bool_param(
             should_autocreate_tables, "should_autocreate_tables"
         )
         self._token_provider = token_provider
@@ -104,15 +104,6 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         self._event_watcher: SqlPollingEventWatcher | None = None
 
         self._secondary_index_cache = {}
-
-        # Stamp and create tables if the main table does not exist (we can't check alembic
-        # revision because alembic config may be shared with other storage classes)
-        if self.should_autocreate_tables:
-            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
-            if "event_logs" not in table_names:
-                retry_pg_creation_fn(self._init_db)
-                self.reindex_events()
-                self.reindex_assets()
 
         super().__init__()
 
@@ -334,14 +325,29 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
                 .on_conflict_do_nothing(),
             )
 
+    def _autocreate_tables(self) -> None:
+        # Stamp and create tables if the main table does not exist (we can't check alembic
+        # revision because alembic config may be shared with other storage classes)
+        if self.should_autocreate_tables:
+            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+            if "event_logs" not in table_names:
+                retry_pg_creation_fn(self._init_db)
+                self.reindex_events()
+                self.reindex_assets()
+            self.should_autocreate_tables = False   # Check only needs to run on first conn
+
+    def _first_run_setup_and_connect(self) -> ContextManager[Connection]:
+        self._autocreate_tables()
+        return self._connect()
+
     def _connect(self) -> ContextManager[Connection]:
         return create_pg_connection(self._engine)
 
     def run_connection(self, run_id: str | None = None) -> ContextManager[Connection]:
-        return self._connect()
+        return self._first_run_setup_and_connect()
 
     def index_connection(self) -> ContextManager[Connection]:
-        return self._connect()
+        return self._first_run_setup_and_connect()
 
     @contextmanager
     def index_transaction(self) -> Iterator[Connection]:

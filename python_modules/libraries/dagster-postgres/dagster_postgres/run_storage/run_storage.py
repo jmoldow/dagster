@@ -81,7 +81,7 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
     ):
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
         self.postgres_url = postgres_url
-        self.should_autocreate_tables = check.bool_param(
+        self.should_autocreate_tables: bool = check.bool_param(
             should_autocreate_tables, "should_autocreate_tables"
         )
         self._token_provider = token_provider
@@ -95,17 +95,6 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
         )
 
         self._index_migration_cache = {}
-
-        # Stamp and create tables if the main table does not exist (we can't check alembic
-        # revision because alembic config may be shared with other storage classes)
-        if self.should_autocreate_tables:
-            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
-            if "runs" not in table_names:
-                retry_pg_creation_fn(self._init_db)
-                self.migrate()
-                self.optimize()
-            elif "instance_info" not in table_names:
-                InstanceInfo.create(self._engine)
 
         super().__init__()
 
@@ -169,6 +158,7 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
         return PostgresRunStorage(postgres_url, should_autocreate_tables)
 
     def connect(self) -> ContextManager[Connection]:
+        self._autocreate_tables()
         return create_pg_connection(self._engine)
 
     def upgrade(self) -> None:
@@ -184,6 +174,19 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
         super().mark_index_built(migration_name)
         if migration_name in self._index_migration_cache:
             del self._index_migration_cache[migration_name]
+
+    def _autocreate_tables(self) -> None:
+        # Stamp and create tables if the main table does not exist (we can't check alembic
+        # revision because alembic config may be shared with other storage classes)
+        if self.should_autocreate_tables:
+            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+            if "runs" not in table_names:
+                retry_pg_creation_fn(self._init_db)
+                self.migrate()
+                self.optimize()
+            elif "instance_info" not in table_names:
+                InstanceInfo.create(self._engine)
+            self.should_autocreate_tables = False   # Check only needs to run on first conn
 
     def add_daemon_heartbeat(self, daemon_heartbeat: DaemonHeartbeat) -> None:
         with self.connect() as conn:

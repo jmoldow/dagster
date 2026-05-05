@@ -81,7 +81,7 @@ class PostgresScheduleStorage(SqlScheduleStorage, ConfigurableClass):
     ):
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
         self.postgres_url = postgres_url
-        self.should_autocreate_tables = check.bool_param(
+        self.should_autocreate_tables: bool = check.bool_param(
             should_autocreate_tables, "should_autocreate_tables"
         )
         self._token_provider = token_provider
@@ -93,14 +93,6 @@ class PostgresScheduleStorage(SqlScheduleStorage, ConfigurableClass):
             isolation_level="AUTOCOMMIT",
             poolclass=db_pool.NullPool,
         )
-
-        # Stamp and create tables if the main table does not exist (we can't check alembic
-        # revision because alembic config may be shared with other storage classes)
-        if self.should_autocreate_tables:
-            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
-            missing_main_table = "schedules" not in table_names and "jobs" not in table_names
-            if missing_main_table:
-                retry_pg_creation_fn(self._init_db)
 
         super().__init__()
 
@@ -167,12 +159,23 @@ class PostgresScheduleStorage(SqlScheduleStorage, ConfigurableClass):
         return PostgresScheduleStorage(postgres_url, should_autocreate_tables)
 
     def connect(self, run_id: str | None = None) -> ContextManager[Connection]:
+        self._autocreate_tables()
         return create_pg_connection(self._engine)
 
     def upgrade(self) -> None:
         alembic_config = pg_alembic_config(__file__)
         with self.connect() as conn:
             run_alembic_upgrade(alembic_config, conn)
+
+    def _autocreate_tables(self) -> None:
+        # Stamp and create tables if the main table does not exist (we can't check alembic
+        # revision because alembic config may be shared with other storage classes)
+        if self.should_autocreate_tables:
+            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+            missing_main_table = "schedules" not in table_names and "jobs" not in table_names
+            if missing_main_table:
+                retry_pg_creation_fn(self._init_db)
+            self.should_autocreate_tables = False   # Check only needs to run on first conn
 
     def _add_or_update_instigators_table(self, conn: Connection, state: InstigatorState) -> None:
         selector_id = state.selector_id

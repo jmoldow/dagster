@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Union, cast, ClassVar
 
 if TYPE_CHECKING:
     from tempfile import TemporaryDirectory
@@ -132,6 +132,8 @@ class DagsterInstance(
     _TEMP_DIRS: "weakref.WeakKeyDictionary[DagsterInstance, TemporaryDirectory]" = (
         weakref.WeakKeyDictionary()
     )
+
+    _DAGSTER_INSTANCE_FROM_DAGSTER_HOME: "ClassVar[DagsterInstance | None]" = None
 
     def __init__(
         self,
@@ -263,8 +265,8 @@ class DagsterInstance(
         return create_ephemeral_instance(tempdir=tempdir, preload=preload, settings=settings)
 
     @public
-    @staticmethod
-    def get() -> "DagsterInstance":
+    @classmethod
+    def get(cls: type[Self]) -> "DagsterInstance":
         """Get the current `DagsterInstance` as specified by the ``DAGSTER_HOME`` environment variable.
 
         Returns:
@@ -272,7 +274,12 @@ class DagsterInstance(
         """
         from dagster._core.instance.factory import create_instance_from_dagster_home
 
-        return create_instance_from_dagster_home()
+        if cls._DAGSTER_INSTANCE_FROM_DAGSTER_HOME is None:
+            instance = create_instance_from_dagster_home()
+            cls._DAGSTER_INSTANCE_FROM_DAGSTER_HOME = instance
+            return instance
+        else:
+            return cls._DAGSTER_INSTANCE_FROM_DAGSTER_HOME
 
     @public
     @staticmethod
