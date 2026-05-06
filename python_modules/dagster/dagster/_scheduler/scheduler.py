@@ -987,8 +987,13 @@ def _tags_for_scheduled_execution_time(
             - guaranteed_globally_unique_run_key (str): a string unique across all schedules and
               ticks, suitable for deduplication; incorporates schedule name, optional user run_key,
               and execution time
-            - runs_filter (RunsFilter): a RunsFilter optimized for querying existing runs for this
-              scheduled execution
+            - runs_filter (RunsFilter): a RunsFilter that queries by ``SCHEDULED_EXECUTION_TIME_TAG``
+              only. Filtering by ``scheduled_execution_time`` is preferred over filtering by
+              ``schedule_name`` or ``run_key`` because the number of matching rows is bounded by the
+              maximum number of simultaneous schedule ticks, whereas ``schedule_name`` and a
+              constant ``run_key`` would match an ever-growing number of rows as the run_tags table
+              grows. The remaining filtering (schedule name, run key) is performed in Python after
+              the DB query.
     """
     scheduled_execution_time_iso = _scheduled_execution_time_iso(schedule_time)
     tags = merge_dicts(
@@ -999,28 +1004,15 @@ def _tags_for_scheduled_execution_time(
     )
     run_key = run_request.run_key
     embedded_run_key = run_key or ""
-    guaranteed_globally_unique_run_key = (
-        f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
-    )
+    guaranteed_globally_unique_run_key = f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
     if run_key:
         tags[RUN_KEY_TAG] = run_key
 
-    # Optimization: fetch runs from the DB with only the scheduled_execution_time tag due to observed perf problems
-    # In the JOIN between the runs and run_tags tables, `key="dagster/scheduled_execution_time" AND value=?`
-    # will match a number of rows that is bounded by the maximum number of simultaneous schedule
-    # ticks, whereas `key="dagster/schedule_name" AND value=?` will match an unbounded,
-    # always-growing number of rows, as will `key="dagster/run_key" AND value=?` if the user sets
-    # `run_key` to a constant. As the run_tags table grows, it is likely more efficient to query
-    # only on scheduled_execution_time, and then perform the rest of the filter in Python.
+    # see docstring for filter rationale
     runs_filter = RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: scheduled_execution_time_iso})
 
-    # In the future, it would be more efficient to query on the hidden
-    # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG that is constructed in a way that is guaranteed to be
-    # globally unique. But since this tag has only just been created, it won't exist for runs
-    # generated from ticks that partially executed right before upgrading to this new version of the
-    # code.
-    # runs_filter = RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: guaranteed_globally_unique_run_key})
-    # tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = guaranteed_globally_unique_run_key
+    # TODO: once a data migration backfills GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG onto
+    # existing runs, switch the runs_filter to use that tag for an exact 0-or-1-row lookup.
 
     return tags, guaranteed_globally_unique_run_key, runs_filter
 
@@ -1040,11 +1032,14 @@ def _get_existing_run_for_request(
     # filter down to runs that match tags (including execution time) and the schedule namespace (repository)
     matching_runs = []
     for run in existing_runs:
+        # We intentionally only check keys present in `tags` (not all run tags), because older
+        # runs won't have GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG. `matching_tags == tags` means
+        # "the run has all the expected tags with the correct values".
         matching_tags = {key: run.tags[key] for key in tags if key in run.tags}
         # if the run doesn't have an origin, just match on tags (including execution time)
         if run.remote_job_origin is None and matching_tags == tags:
             matching_runs.append(run)
-        # otherwise prevent the same named schedule (with the same execution time and same tags) across repos from effecting each other
+        # otherwise prevent the same named schedule (with the same execution time and same tags) across repos from affecting each other
         elif (
             run.remote_job_origin is not None
             and remote_schedule.get_remote_origin().repository_origin.get_selector_id()

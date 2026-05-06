@@ -1307,22 +1307,10 @@ def fetch_existing_runs(
         # how the query planner does the runs/run_tags join
         runs_filter = RunsFilter(tags={RUN_KEY_TAG: run_key})
 
-        # In the future, it _could_ be _slightly_ more efficient to query on the hidden
-        # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG that is constructed in a way that is guaranteed to
-        # be globally unique, and therefore guaranteed to only return 0 or 1 rows. The regular
-        # RUN_KEY_TAG is _likely_ to be globally unique or nearly-unique, but is only guaranteed to
-        # be unique **per sensor**.
-        # But since this tag has only just been created, it won't exist for runs generated before
-        # upgrading to this new version of the code. Since a sensor could re-generate an
-        # already-seen RunRequest with an already-serialized run_key at any arbitrary point in the
-        # time (could be immediately after a version upgrade, or it could be years in the future),
-        # we should not switch to filtering on GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG unless a data
-        # migration is created and executed to backfill all old sensor run keys into
-        # guaranteed_globally_unique_run_key tags. That would likely be complicated and risky, and
-        # is unlikely to be worth the effort compared to the relatively small (if any) efficiency
-        # boost of switching from RunsFilter({RUN_KEY_TAG: ...}) to
-        # RunsFilter({GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: ...}) for the sensor use-case.
-        # runs_filter = RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: guaranteed_globally_unique_run_key})
+        # TODO: once a data migration backfills GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG onto
+        # existing sensor runs, switch the runs_filter to use that tag for an exact 0-or-1-row
+        # lookup. Note: unlike the scheduler, sensor run keys are only guaranteed unique per
+        # sensor (not globally), so the migration would need to account for that.
 
         runs_with_run_keys.extend(instance.get_runs(filters=runs_filter))
 
@@ -1332,7 +1320,7 @@ def fetch_existing_runs(
         # if the run doesn't have a set origin, just match on sensor name
         if run.remote_job_origin is None and run.tags.get(SENSOR_NAME_TAG) == remote_sensor.name:
             valid_runs.append(run)
-        # otherwise prevent the same named sensor across repos from effecting each other
+        # otherwise prevent the same named sensor across repos from affecting each other
         elif (
             run.remote_job_origin is not None
             and run.remote_job_origin.repository_origin.get_selector()
@@ -1419,7 +1407,9 @@ def _create_sensor_run(
     }
     if run_key := run_request.run_key:
         tags[RUN_KEY_TAG] = run_key
-        tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = f"sensor:name={remote_sensor.name},run_key={run_key}"
+        tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = (
+            f"sensor:name={remote_sensor.name},run_key={run_key}"
+        )
 
     log_action(
         instance,

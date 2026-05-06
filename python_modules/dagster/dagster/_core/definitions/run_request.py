@@ -75,16 +75,17 @@ class RunRequest(IHaveNew, LegacyNamedTupleMixin):
               always be launched per evaluation. A non-empty run key will be enforced to be unique
               within the current sensor, but not globally unique across **all** sensors. Two different
               sensors can both emit RunRequests for the same run key, and each run will be created and
-              associated with the sensor that created it. But if one sensor emits multiple RunRequests
-              for the same run key, only one run will be created, and all runs after the successful
-              creation will be deduplicated and dropped.
+              associated with the sensor that created it. But if multiple evaluations of one sensor
+              emit multiple RunRequests for the same run key, only one run will be created, and all
+              subsequent RunRequests for the same run key within that sensor will be deduplicated
+              and dropped.
             - For schedules, ensures that one run is created per (run key, tick) pair, across failure
               recoveries for that tick. Schedules that return multiple RunRequests must specify a
               non-empty run_key in each RunRequest. Schedules that return a single RunRequest may or
               may not specify a run key. Even if run_key is empty, Dagster will still ensure that one
               run is created for each tick, across failure recoveries for that tick.
         run_config (Optional[Union[RunConfig, Mapping[str, Any]]]: Configuration for the run. If the job has
-            a :py:class:`PartitionedConfig`, this value will override replace the config
+            a :py:class:`PartitionedConfig`, this value will override the config
             provided by it.
         tags (Optional[Dict[str, Any]]): A dictionary of tags (string key-value pairs) to attach
             to the launched run.
