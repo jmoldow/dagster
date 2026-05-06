@@ -40,6 +40,8 @@ from dagster._core.scheduler.instigation import (
     SensorInstigatorData,
     TickStatus,
 )
+from dagster._core.storage.dagster_run import RunsFilter
+from dagster._core.storage.tags import GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG
 from dagster._core.test_utils import (
     BlockingThreadPoolExecutor,
     create_test_daemon_workspace_context,
@@ -3616,3 +3618,60 @@ def test_sensor_run_tags(
         )
         assert "tag_foo" not in no_tags_with_run_tags_run.tags
         assert no_tags_with_run_tags_run.tags["run_tag_foo"] == "bar"
+
+
+def test_guaranteed_globally_unique_run_key_tag(
+    executor: ThreadPoolExecutor,
+    instance: DagsterInstance,
+    workspace_context: WorkspaceProcessContext,
+    remote_repo: RemoteRepository,
+) -> None:
+    """GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG is written iff run_key is set on a sensor run.
+    When present it encodes repo label, sensor name, and run_key, and can be used to look up
+    the run directly.
+    """
+    freeze_datetime = create_datetime(year=2019, month=2, day=27)
+    with freeze_time(freeze_datetime):
+        # Sensor WITH run_key
+        sensor_with_key = remote_repo.get_sensor("run_key_sensor")
+        instance.start_sensor(sensor_with_key)
+
+        # Sensor WITHOUT run_key (always_on_sensor returns run_key=None)
+        sensor_no_key = remote_repo.get_sensor("always_on_sensor")
+        instance.start_sensor(sensor_no_key)
+
+        evaluate_sensors(workspace_context, executor)
+
+        wait_for_all_runs_to_start(instance)
+
+        runs = instance.get_runs()
+        assert len(runs) == 2
+
+        repo_label = sensor_with_key.get_remote_origin().repository_origin.get_label()
+
+        # --- run_key_sensor: tag must be present with correct value ---
+        run_with_key = next(
+            run for run in runs if run.tags.get("dagster/sensor_name") == "run_key_sensor"
+        )
+        expected_tag = f"sensor:repo={repo_label},name=run_key_sensor,run_key=only_once"
+        assert run_with_key.tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] == expected_tag
+
+        # Run can be looked up directly by this tag
+        by_tag = instance.get_runs(
+            RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: expected_tag})
+        )
+        assert len(by_tag) == 1
+        assert by_tag[0].run_id == run_with_key.run_id
+
+        # --- always_on_sensor (no run_key): tag must NOT be present ---
+        run_no_key = next(
+            run for run in runs if run.tags.get("dagster/sensor_name") == "always_on_sensor"
+        )
+        assert GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG not in run_no_key.tags
+
+        # --- Idempotence: run_key_sensor should not create a second run on immediate re-evaluation ---
+        evaluate_sensors(workspace_context, executor)
+        run_with_key_runs = instance.get_runs(
+            RunsFilter(tags={"dagster/sensor_name": "run_key_sensor"})
+        )
+        assert len(run_with_key_runs) == 1  # still only one run for run_key_sensor

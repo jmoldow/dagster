@@ -1411,8 +1411,9 @@ def _create_sensor_run(
         tags[RUN_KEY_TAG] = run_key
         # For new sensor runs, GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG should be set if-and-only if
         # RUN_KEY_TAG exists.
+        repo_label = remote_sensor.get_remote_origin().repository_origin.get_label()
         tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = (
-            f"sensor:name={remote_sensor.name},run_key={run_key}"
+            f"sensor:repo={repo_label},name={remote_sensor.name},run_key={run_key}"
         )
 
     log_action(

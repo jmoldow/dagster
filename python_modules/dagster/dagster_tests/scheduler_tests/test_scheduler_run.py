@@ -38,7 +38,11 @@ from dagster._core.scheduler.instigation import (
 )
 from dagster._core.scheduler.scheduler import DEFAULT_MAX_CATCHUP_RUNS
 from dagster._core.storage.dagster_run import DagsterRunStatus, RunsFilter
-from dagster._core.storage.tags import PARTITION_NAME_TAG, SCHEDULED_EXECUTION_TIME_TAG
+from dagster._core.storage.tags import (
+    GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG,
+    PARTITION_NAME_TAG,
+    SCHEDULED_EXECUTION_TIME_TAG,
+)
 from dagster._core.test_utils import (
     BlockingThreadPoolExecutor,
     SingleThreadPoolExecutor,
@@ -1287,6 +1291,89 @@ def test_repository_namespacing(instance: DagsterInstance, executor):
             ticks = instance.get_ticks(other_origin.get_id(), other_schedule.selector_id)
             assert len(ticks) == 1
             assert ticks[0].status == TickStatus.SUCCESS
+
+
+@pytest.mark.parametrize("executor", get_schedule_executors())
+def test_guaranteed_globally_unique_run_key_tag(
+    instance: DagsterInstance,
+    workspace_context: WorkspaceProcessContext,
+    remote_repo: RemoteRepository,
+    executor,
+):
+    """GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG is written on every scheduler run and encodes
+    the repo label, schedule name, optional run_key, and execution time.
+    Runs can be uniquely looked up by this tag.
+    """
+    freeze_datetime = feb_27_2019_one_second_to_midnight()
+
+    with freeze_time(freeze_datetime):
+        # --- Test 1: schedule with no user-provided run_key (simple_schedule) ---
+        schedule = remote_repo.get_schedule("simple_schedule")
+        instance.start_schedule(schedule)
+
+        # Schedule with run_key (multi_run_list_schedule emits run_key="A" and "B")
+        schedule_with_keys = remote_repo.get_schedule("multi_run_list_schedule")
+        instance.start_schedule(schedule_with_keys)
+
+        assert instance.get_runs_count() == 0
+
+    freeze_datetime = freeze_datetime + relativedelta(seconds=2)
+    with freeze_time(freeze_datetime):
+        evaluate_schedules(workspace_context, executor, get_current_datetime())
+
+        # simple_schedule: 1 run (no run_key)
+        simple_runs = instance.get_runs(
+            RunsFilter(tags={"dagster/schedule_name": "simple_schedule"})
+        )
+        assert len(simple_runs) == 1
+        simple_run = simple_runs[0]
+
+        expected_exec_time = create_datetime(year=2019, month=2, day=28).astimezone(
+            datetime.timezone.utc
+        )
+        expected_exec_iso = expected_exec_time.isoformat()
+        repo_label = schedule.get_remote_origin().repository_origin.get_label()
+
+        # Tag must be present and encode empty run_key
+        expected_tag_no_key = (
+            f"schedule:repo={repo_label},name=simple_schedule,run_key=,time={expected_exec_iso}"
+        )
+        assert simple_run.tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] == expected_tag_no_key
+
+        # Run can be looked up directly by this tag
+        by_tag = instance.get_runs(
+            RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: expected_tag_no_key})
+        )
+        assert len(by_tag) == 1
+        assert by_tag[0].run_id == simple_run.run_id
+
+        # multi_run_list_schedule: 2 runs (run_key "A" and "B")
+        keyed_runs = instance.get_runs(
+            RunsFilter(tags={"dagster/schedule_name": "multi_run_list_schedule"})
+        )
+        assert len(keyed_runs) == 2
+
+        repo_label_keys = schedule_with_keys.get_remote_origin().repository_origin.get_label()
+        for run in keyed_runs:
+            run_key = run.tags["dagster/run_key"]
+            expected_tag = (
+                f"schedule:repo={repo_label_keys}"
+                f",name=multi_run_list_schedule"
+                f",run_key={run_key}"
+                f",time={expected_exec_iso}"
+            )
+            assert run.tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] == expected_tag
+
+            # Each run can be uniquely looked up by the tag
+            by_tag = instance.get_runs(
+                RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: expected_tag})
+            )
+            assert len(by_tag) == 1
+            assert by_tag[0].run_id == run.run_id
+
+        # Idempotence: re-evaluating produces no new runs
+        evaluate_schedules(workspace_context, executor, get_current_datetime())
+        assert instance.get_runs_count() == 3  # still 1 + 2
 
 
 def test_stale_request_context(

@@ -50,9 +50,10 @@ def test_scheduled_execution_time_iso_with_naive_datetime_behavior():
     assert parsed.tzinfo == datetime.timezone.utc
 
 
-def _make_remote_schedule(name: str) -> MagicMock:
+def _make_remote_schedule(name: str, repo_label: str = "the_repo@the_location") -> MagicMock:
     mock = MagicMock()
     mock.name = name
+    mock.get_remote_origin.return_value.repository_origin.get_label.return_value = repo_label
     return mock
 
 
@@ -73,7 +74,10 @@ def test_unique_identity_tags_for_scheduled_execution_time_no_run_key():
     assert tags[SCHEDULE_NAME_TAG] == "my_schedule"
     assert tags[SCHEDULED_EXECUTION_TIME_TAG] == expected_iso
     assert RUN_KEY_TAG not in tags
-    assert unique_key == f"schedule:name=my_schedule,run_key=,time={expected_iso}"
+    assert (
+        unique_key
+        == f"schedule:repo=the_repo@the_location,name=my_schedule,run_key=,time={expected_iso}"
+    )
     assert runs_filter == RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: expected_iso})
 
 
@@ -90,7 +94,10 @@ def test_unique_identity_tags_for_scheduled_execution_time_with_run_key():
     assert tags[SCHEDULE_NAME_TAG] == "my_schedule"
     assert tags[SCHEDULED_EXECUTION_TIME_TAG] == expected_iso
     assert tags[RUN_KEY_TAG] == "partition_A"
-    assert unique_key == f"schedule:name=my_schedule,run_key=partition_A,time={expected_iso}"
+    assert (
+        unique_key
+        == f"schedule:repo=the_repo@the_location,name=my_schedule,run_key=partition_A,time={expected_iso}"
+    )
     assert runs_filter == RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: expected_iso})
 
 
@@ -109,6 +116,19 @@ def test_unique_identity_tags_for_scheduled_execution_time_unique_key_differs_by
     )
     assert key_no_run_key != key_run_key_a
     assert key_run_key_a != key_run_key_b
+
+
+def test_unique_identity_tags_for_scheduled_execution_time_unique_key_differs_by_repo():
+    schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    run_request = _make_run_request("same_key")
+
+    _, key_repo_a, _ = _unique_identity_tags_for_scheduled_execution_time(
+        _make_remote_schedule("same_schedule", repo_label="repo_a@loc"), schedule_time, run_request
+    )
+    _, key_repo_b, _ = _unique_identity_tags_for_scheduled_execution_time(
+        _make_remote_schedule("same_schedule", repo_label="repo_b@loc"), schedule_time, run_request
+    )
+    assert key_repo_a != key_repo_b
 
 
 def test_unique_identity_tags_for_scheduled_execution_time_unique_key_differs_by_schedule_name():

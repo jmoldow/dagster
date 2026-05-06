@@ -1019,7 +1019,13 @@ def _unique_identity_tags_for_scheduled_execution_time(
     )
     run_key = run_request.run_key
     embedded_run_key = run_key or ""
-    guaranteed_globally_unique_run_key = f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
+    repo_label = remote_schedule.get_remote_origin().repository_origin.get_label()
+    guaranteed_globally_unique_run_key = (
+        f"schedule:repo={repo_label}"
+        f",name={remote_schedule.name}"
+        f",run_key={embedded_run_key}"
+        f",time={scheduled_execution_time_iso}"
+    )
     if run_key:
         unique_identity_tags[RUN_KEY_TAG] = run_key
 
