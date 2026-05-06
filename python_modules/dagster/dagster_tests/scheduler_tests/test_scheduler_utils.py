@@ -12,7 +12,7 @@ from dagster._core.storage.tags import (
 from dagster._scheduler.scheduler import (
     _get_next_scheduler_iteration_time,
     _scheduled_execution_time_iso,
-    _tags_for_scheduled_execution_time,
+    _unique_identity_tags_for_scheduled_execution_time,
 )
 
 MINUTE_BOUNDARY = 1670596320
@@ -65,7 +65,7 @@ def test_tags_for_scheduled_execution_time_no_run_key():
     remote_schedule = _make_remote_schedule("my_schedule")
     run_request = _make_run_request(None)
 
-    tags, unique_key, runs_filter = _tags_for_scheduled_execution_time(
+    tags, unique_key, runs_filter = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, run_request
     )
 
@@ -82,7 +82,7 @@ def test_tags_for_scheduled_execution_time_with_run_key():
     remote_schedule = _make_remote_schedule("my_schedule")
     run_request = _make_run_request("partition_A")
 
-    tags, unique_key, runs_filter = _tags_for_scheduled_execution_time(
+    tags, unique_key, runs_filter = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, run_request
     )
 
@@ -98,13 +98,13 @@ def test_tags_for_scheduled_execution_time_unique_key_differs_by_run_key():
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     remote_schedule = _make_remote_schedule("my_schedule")
 
-    _, key_no_run_key, _ = _tags_for_scheduled_execution_time(
+    _, key_no_run_key, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request(None)
     )
-    _, key_run_key_a, _ = _tags_for_scheduled_execution_time(
+    _, key_run_key_a, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request("partition_A")
     )
-    _, key_run_key_b, _ = _tags_for_scheduled_execution_time(
+    _, key_run_key_b, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request("partition_B")
     )
     assert key_no_run_key != key_run_key_a
@@ -115,10 +115,10 @@ def test_tags_for_scheduled_execution_time_unique_key_differs_by_schedule_name()
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     run_request = _make_run_request("same_key")
 
-    _, key_a, _ = _tags_for_scheduled_execution_time(
+    _, key_a, _ = _unique_identity_tags_for_scheduled_execution_time(
         _make_remote_schedule("schedule_a"), schedule_time, run_request
     )
-    _, key_b, _ = _tags_for_scheduled_execution_time(
+    _, key_b, _ = _unique_identity_tags_for_scheduled_execution_time(
         _make_remote_schedule("schedule_b"), schedule_time, run_request
     )
     assert key_a != key_b
@@ -132,12 +132,12 @@ def test_tags_for_scheduled_execution_time_guaranteed_unique_key_not_written_to_
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     remote_schedule = _make_remote_schedule("my_schedule")
 
-    tags, _, _ = _tags_for_scheduled_execution_time(
+    tags, _, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request(None)
     )
     assert GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG not in tags
 
-    tags_with_key, _, _ = _tags_for_scheduled_execution_time(
+    tags_with_key, _, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request("k")
     )
     assert GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG not in tags_with_key
