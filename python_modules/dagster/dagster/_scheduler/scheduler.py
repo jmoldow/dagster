@@ -1019,24 +1019,16 @@ def _unique_identity_tags_for_scheduled_execution_time(
     )
     run_key = run_request.run_key
     embedded_run_key = run_key or ""
-    guaranteed_globally_unique_run_key = (
-        f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
-    )
+    guaranteed_globally_unique_run_key = f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
     if run_key:
         unique_identity_tags[RUN_KEY_TAG] = run_key
 
     runs_filter = RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: scheduled_execution_time_iso})
 
-    # TODO: It is the intention behind the creation of the hidden
-    # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG that it be used to query for runs more efficiently. It
-    # is constructed in a way that is guaranteed to be globally unique, thus producing exactly
-    # 0-or-1-row lookups. But this tag won't exist for runs generated from ticks that partially
-    # executed on versions of the Dagster code that did not generate the
-    # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG. So a conditional will need to be implemented, to use
-    # the more efficient GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG query whenever possible, and
-    # otherwise falling back to SCHEDULED_EXECUTION_TIME_TAG. For now, we always use
-    # SCHEDULED_EXECUTION_TIME_TAG and never use GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG in the
-    # queries.
+    # TODO: GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG was introduced to enable more efficient run
+    # lookups — it is globally unique, so a filter on it would return exactly 0 or 1 rows. But
+    # the tag won't exist on runs created before this code shipped, so a conditional fallback to
+    # SCHEDULED_EXECUTION_TIME_TAG will be needed. For now we always use SCHEDULED_EXECUTION_TIME_TAG.
     # runs_filter = RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: guaranteed_globally_unique_run_key})
     # TODO: And if at some point we can guarantee that the tag will exist for all runs generated
     # from recent ticks that partially executed, then we can always use
@@ -1105,7 +1097,9 @@ def _create_scheduler_run(
     )
     execution_plan_snapshot = remote_execution_plan.execution_plan_snapshot
     unique_identity_tags_for_scheduled_execution_time, guaranteed_globally_unique_run_key, _ = (
-        _unique_identity_tags_for_scheduled_execution_time(remote_schedule, schedule_time, run_request)
+        _unique_identity_tags_for_scheduled_execution_time(
+            remote_schedule, schedule_time, run_request
+        )
     )
 
     tags = {

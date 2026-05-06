@@ -60,7 +60,7 @@ def _make_run_request(run_key: str | None) -> RunRequest:
     return RunRequest(run_key=run_key)
 
 
-def test_tags_for_scheduled_execution_time_no_run_key():
+def test_unique_identity_tags_for_scheduled_execution_time_no_run_key():
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     remote_schedule = _make_remote_schedule("my_schedule")
     run_request = _make_run_request(None)
@@ -77,7 +77,7 @@ def test_tags_for_scheduled_execution_time_no_run_key():
     assert runs_filter == RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: expected_iso})
 
 
-def test_tags_for_scheduled_execution_time_with_run_key():
+def test_unique_identity_tags_for_scheduled_execution_time_with_run_key():
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     remote_schedule = _make_remote_schedule("my_schedule")
     run_request = _make_run_request("partition_A")
@@ -94,7 +94,7 @@ def test_tags_for_scheduled_execution_time_with_run_key():
     assert runs_filter == RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: expected_iso})
 
 
-def test_tags_for_scheduled_execution_time_unique_key_differs_by_run_key():
+def test_unique_identity_tags_for_scheduled_execution_time_unique_key_differs_by_run_key():
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     remote_schedule = _make_remote_schedule("my_schedule")
 
@@ -111,7 +111,7 @@ def test_tags_for_scheduled_execution_time_unique_key_differs_by_run_key():
     assert key_run_key_a != key_run_key_b
 
 
-def test_tags_for_scheduled_execution_time_unique_key_differs_by_schedule_name():
+def test_unique_identity_tags_for_scheduled_execution_time_unique_key_differs_by_schedule_name():
     schedule_time = datetime.datetime(2024, 6, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
     run_request = _make_run_request("same_key")
 
@@ -124,7 +124,7 @@ def test_tags_for_scheduled_execution_time_unique_key_differs_by_schedule_name()
     assert key_a != key_b
 
 
-def test_tags_for_scheduled_execution_time_guaranteed_unique_key_not_written_to_tags():
+def test_unique_identity_tags_for_scheduled_execution_time_guaranteed_unique_key_not_written_to_tags():
     # The GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG is intentionally NOT included in the
     # returned tags dict — it is written separately in _create_scheduler_run so that
     # _get_existing_run_for_request can compare tags without the new hidden tag
