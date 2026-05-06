@@ -1306,11 +1306,13 @@ def fetch_existing_runs(
         # do serial fetching, which has better perf than a single query with an IN clause, due to
         # how the query planner does the runs/run_tags join
         runs_filter = RunsFilter(tags={RUN_KEY_TAG: run_key})
-
-        # TODO: once a data migration backfills GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG onto
-        # existing sensor runs, switch the runs_filter to use that tag for an exact 0-or-1-row
-        # lookup. Note: unlike the scheduler, sensor run keys are only guaranteed unique per
-        # sensor (not globally), so the migration would need to account for that.
+        # In the future, if a data migration backfills GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG onto
+        # existing sensor runs, it _could_ be _slightly_ more efficient to query on the hidden
+        # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG. That tag is constructed in a way that is
+        # guaranteed to be globally unique, and therefore guaranteed to only return 0 or 1 rows. The
+        # regular RUN_KEY_TAG is _likely_ to be globally unique or nearly-unique, but is only
+        # guaranteed to be unique **per sensor**. The data migration would likely be complicated and
+        # risky, and is unlikely to be worth the effort.
 
         runs_with_run_keys.extend(instance.get_runs(filters=runs_filter))
 

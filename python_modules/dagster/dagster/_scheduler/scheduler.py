@@ -967,36 +967,51 @@ def _scheduled_execution_time_iso(schedule_time: datetime.datetime) -> str:
     return schedule_time.astimezone(datetime.timezone.utc).isoformat()
 
 
-def _tags_for_scheduled_execution_time(
+def _unique_identity_tags_for_scheduled_execution_time(
     remote_schedule: RemoteSchedule,
     schedule_time: datetime.datetime,
     run_request: RunRequest,
 ) -> tuple[dict[str, str], str, RunsFilter]:
-    """Computes run tags, a globally-unique run key, and a RunsFilter for a scheduled execution.
-
-    Note: ``GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG`` is intentionally NOT included in the returned
-    tags dict. It is written separately in ``_create_scheduler_run`` so that
-    ``_get_existing_run_for_request`` can compare tags against existing runs without including the
-    new hidden tag — older runs created before this tag existed would otherwise never match,
-    breaking deduplication during the upgrade window.
+    """Computes unique identity run tags, a globally-unique run key, and a RunsFilter for a scheduled execution.
 
     Returns:
         tuple: A 3-tuple of:
-            - tags (dict[str, str]): run tags including schedule metadata and the user-provided
-              run_key (if any)
-            - guaranteed_globally_unique_run_key (str): a string unique across all schedules and
+            - unique_identity_tags (dict[str, str]): Run tags - including tags for schedule and the
+              user-provided ``run_key`` (if any) - that taken together uniquely identify the
+              RunRequest. Should be included in any calls to ``instance.create_run()``.
+
+            - guaranteed_globally_unique_run_key (str): A string unique across all schedules and
               ticks, suitable for deduplication; incorporates schedule name, optional user run_key,
-              and execution time
-            - runs_filter (RunsFilter): a RunsFilter that queries by ``SCHEDULED_EXECUTION_TIME_TAG``
-              only. Filtering by ``scheduled_execution_time`` is preferred over filtering by
-              ``schedule_name`` or ``run_key`` because the number of matching rows is bounded by the
-              maximum number of simultaneous schedule ticks, whereas ``schedule_name`` and a
-              constant ``run_key`` would match an ever-growing number of rows as the run_tags table
-              grows. The remaining filtering (schedule name, run key) is performed in Python after
-              the DB query.
+              and execution time. Should be included in the ``tags`` that are passed to
+              ``instance.create_run()``.
+
+              IMPLEMENTATION NOTE: For now, intentionally NOT included in the returned
+              ``unique_identity_tags``, and must be merged manually into the final ``tags`` map that
+              is passed to ``instance.create_run()``. This is so that
+              ``_get_existing_run_for_request`` can compare ``unique_identity_tags`` against
+              existing runs without including the new hidden tag — older runs created before this
+              tag existed would otherwise never match, breaking deduplication during the upgrade
+              window.
+
+            - runs_filter (RunsFilter): A RunsFilter optimized for querying existing runs for this
+              scheduled execution. Guaranteed to find the matching run, if it exists. Not guaranteed
+              to return only 0 or 1 results. For that, the results must be filtered in Python using
+              ``unique_identity_tags``, which is currently performed in ``_get_existing_run_for_request``.
+
+              IMPLEMENTATION NOTE: Currently, ``runs_filter`` queries by
+              ``scheduled_execution_time`` only due to observed perf problems. Filtering by
+              ``scheduled_execution_time`` is preferred over filtering by ``schedule_name``,
+              ``run_key``, or a JOIN of ``scheduled_execution_time`` plus any combination of the
+              other tags. In the JOIN between the ``runs`` and ``run_tags`` tables, the number of rows
+              matching ``key="dagster/scheduled_execution_time" AND value=?`` is bounded by
+              the maximum number of simultaneous schedule ticks, whereas similar JOIN subqueries for
+              ``schedule_name`` or a constant ``run_key`` would match an ever-growing number of rows
+              as the ``run_tags`` table grows. The remaining filtering is performed in Python after
+              the DB query. As the ``run_tags`` table grows, it is likely more efficient to query
+              only on ``scheduled_execution_time``, and then perform the rest of the filter in Python.
     """
     scheduled_execution_time_iso = _scheduled_execution_time_iso(schedule_time)
-    tags = merge_dicts(
+    unique_identity_tags = merge_dicts(
         DagsterRun.tags_for_schedule(remote_schedule),
         {
             SCHEDULED_EXECUTION_TIME_TAG: scheduled_execution_time_iso,
@@ -1004,17 +1019,31 @@ def _tags_for_scheduled_execution_time(
     )
     run_key = run_request.run_key
     embedded_run_key = run_key or ""
-    guaranteed_globally_unique_run_key = f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
+    guaranteed_globally_unique_run_key = (
+        f"schedule:name={remote_schedule.name},run_key={embedded_run_key},time={scheduled_execution_time_iso}"
+    )
     if run_key:
-        tags[RUN_KEY_TAG] = run_key
+        unique_identity_tags[RUN_KEY_TAG] = run_key
 
-    # see docstring for filter rationale
     runs_filter = RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: scheduled_execution_time_iso})
 
-    # TODO: once a data migration backfills GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG onto
-    # existing runs, switch the runs_filter to use that tag for an exact 0-or-1-row lookup.
+    # TODO: It is the intention behind the creation of the hidden
+    # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG that it be used to query for runs more efficiently. It
+    # is constructed in a way that is guaranteed to be globally unique, thus producing exactly
+    # 0-or-1-row lookups. But this tag won't exist for runs generated from ticks that partially
+    # executed on versions of the Dagster code that did not generate the
+    # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG. So a conditional will need to be implemented, to use
+    # the more efficient GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG query whenever possible, and
+    # otherwise falling back to SCHEDULED_EXECUTION_TIME_TAG. For now, we always use
+    # SCHEDULED_EXECUTION_TIME_TAG and never use GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG in the
+    # queries.
+    # runs_filter = RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: guaranteed_globally_unique_run_key})
+    # TODO: And if at some point we can guarantee that the tag will exist for all runs generated
+    # from recent ticks that partially executed, then we can always use
+    # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG, and we can add it into unique_identity_tags.
+    # unique_identity_tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = guaranteed_globally_unique_run_key
 
-    return tags, guaranteed_globally_unique_run_key, runs_filter
+    return unique_identity_tags, guaranteed_globally_unique_run_key, runs_filter
 
 
 def _get_existing_run_for_request(
@@ -1023,28 +1052,29 @@ def _get_existing_run_for_request(
     schedule_time: datetime.datetime,
     run_request: RunRequest,
 ) -> DagsterRun | None:
-    tags, _, runs_filter = _tags_for_scheduled_execution_time(
+    unique_identity_tags, _, runs_filter = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, run_request
     )
 
     existing_runs = instance.get_runs(runs_filter)
 
-    # filter down to runs that match tags (including execution time) and the schedule namespace (repository)
+    # filter down to runs that match unique_identity_tags (including execution time) and the schedule namespace (repository)
     matching_runs = []
     for run in existing_runs:
-        # We intentionally only check keys present in `tags` (not all run tags), because older
-        # runs won't have GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG. `matching_tags == tags` means
-        # "the run has all the expected tags with the correct values".
-        matching_tags = {key: run.tags[key] for key in tags if key in run.tags}
+        # We intentionally only check keys present in `unique_identity_tags` (not all run tags), because older
+        # runs won't have GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG, and other tags don't convey unique
+        # identity. `matching_tags == unique_identity_tags` means "the run has all the expected
+        # unique_identity_tags with the correct values".
+        matching_tags = {key: run.tags[key] for key in unique_identity_tags if key in run.tags}
         # if the run doesn't have an origin, just match on tags (including execution time)
-        if run.remote_job_origin is None and matching_tags == tags:
+        if run.remote_job_origin is None and matching_tags == unique_identity_tags:
             matching_runs.append(run)
         # otherwise prevent the same named schedule (with the same execution time and same tags) across repos from affecting each other
         elif (
             run.remote_job_origin is not None
             and remote_schedule.get_remote_origin().repository_origin.get_selector_id()
             == run.remote_job_origin.repository_origin.get_selector_id()
-            and matching_tags == tags
+            and matching_tags == unique_identity_tags
         ):
             matching_runs.append(run)
 
@@ -1074,14 +1104,14 @@ def _create_scheduler_run(
         known_state=None,
     )
     execution_plan_snapshot = remote_execution_plan.execution_plan_snapshot
-    tags_for_scheduled_execution_time, guaranteed_globally_unique_run_key, _ = (
-        _tags_for_scheduled_execution_time(remote_schedule, schedule_time, run_request)
+    unique_identity_tags_for_scheduled_execution_time, guaranteed_globally_unique_run_key, _ = (
+        _unique_identity_tags_for_scheduled_execution_time(remote_schedule, schedule_time, run_request)
     )
 
     tags = {
         **remote_job.run_tags,
         **schedule_tags,
-        **tags_for_scheduled_execution_time,
+        **unique_identity_tags_for_scheduled_execution_time,
         GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: guaranteed_globally_unique_run_key,
     }
 

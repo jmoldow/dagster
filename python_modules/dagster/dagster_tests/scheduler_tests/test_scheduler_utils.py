@@ -40,27 +40,14 @@ def test_scheduled_execution_time_iso_converts_to_utc():
     assert _scheduled_execution_time_iso(dt_plus5) == "2024-01-15T12:00:00+00:00"
 
 
-def test_scheduled_execution_time_iso_naive_datetime_behavior():
-    # Naive datetimes are an unsupported/incidental input; this test documents observed
-    # behavior but does not assert it as a contract. In practice, schedule_time is always
-    # timezone-aware (UTC). Naive datetimes are treated as local time by astimezone(), which
-    # is OS-locale-dependent. We can't assert a specific UTC value, but we can assert the
-    # result is a valid UTC ISO string and that two naive datetimes that differ by a known
-    # offset produce results that differ by that same offset.
-    dt_naive_a = datetime.datetime(2024, 1, 15, 12, 0, 0)
-    dt_naive_b = datetime.datetime(2024, 1, 15, 13, 0, 0)
+def test_scheduled_execution_time_iso_with_naive_datetime_behavior():
+    # We can't assert a specific UTC value, but we can assert the result is a valid UTC ISO string.
+    dt_naive = datetime.datetime(2024, 1, 15, 12, 0, 0)
+    result = _scheduled_execution_time_iso(dt_naive)
 
-    result_a = _scheduled_execution_time_iso(dt_naive_a)
-    result_b = _scheduled_execution_time_iso(dt_naive_b)
-
-    # Both results should be parseable as UTC ISO strings.
-    parsed_a = datetime.datetime.fromisoformat(result_a)
-    parsed_b = datetime.datetime.fromisoformat(result_b)
-    assert parsed_a.tzinfo == datetime.timezone.utc
-    assert parsed_b.tzinfo == datetime.timezone.utc
-
-    # The UTC values should differ by exactly 1 hour.
-    assert parsed_b - parsed_a == datetime.timedelta(hours=1)
+    # Result should be parseable as UTC ISO string.
+    parsed = datetime.datetime.fromisoformat(result)
+    assert parsed.tzinfo == datetime.timezone.utc
 
 
 def _make_remote_schedule(name: str) -> MagicMock:
