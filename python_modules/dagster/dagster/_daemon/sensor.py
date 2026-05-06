@@ -49,7 +49,11 @@ from dagster._core.scheduler.instigation import (
     TickStatus,
 )
 from dagster._core.storage.dagster_run import DagsterRun, DagsterRunStatus, RunsFilter
-from dagster._core.storage.tags import RUN_KEY_TAG, SENSOR_NAME_TAG
+from dagster._core.storage.tags import (
+    GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG,
+    RUN_KEY_TAG,
+    SENSOR_NAME_TAG,
+)
 from dagster._core.telemetry import SENSOR_RUN_CREATED, hash_name, log_action
 from dagster._core.utils import make_new_backfill_id, make_new_run_id
 from dagster._core.workspace.context import IWorkspaceProcessContext
@@ -1301,9 +1305,26 @@ def fetch_existing_runs(
     for run_key in run_keys:
         # do serial fetching, which has better perf than a single query with an IN clause, due to
         # how the query planner does the runs/run_tags join
-        runs_with_run_keys.extend(
-            instance.get_runs(filters=RunsFilter(tags={RUN_KEY_TAG: run_key}))
-        )
+        runs_filter = RunsFilter(tags={RUN_KEY_TAG: run_key})
+
+        # In the future, it _could_ be _slightly_ more efficient to query on the hidden
+        # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG that is constructed in a way that is guaranteed to
+        # be globally unique, and therefore guaranteed to only return 0 or 1 rows. The regular
+        # RUN_KEY_TAG is _likely_ to be globally unique or nearly-unique, but is only guaranteed to
+        # be unique **per sensor**.
+        # But since this tag has only just been created, it won't exist for runs generated before
+        # upgrading to this new version of the code. Since a sensor could re-generate an
+        # already-seen RunRequest with an already-serialized run_key at any arbitrary point in the
+        # time (could be immediately after a version upgrade, or it could be years in the future),
+        # we should not switch to filtering on GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG unless a data
+        # migration is created and executed to backfill all old sensor run keys into
+        # guaranteed_globally_unique_run_key tags. That would likely be complicated and risky, and
+        # is unlikely to be worth the effort compared to the relatively small (if any) efficiency
+        # boost of switching from RunsFilter({RUN_KEY_TAG: ...}) to
+        # RunsFilter({GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: ...}) for the sensor use-case.
+        # runs_filter = RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: guaranteed_globally_unique_run_key})
+
+        runs_with_run_keys.extend(instance.get_runs(filters=runs_filter))
 
     # filter down to runs with run_key that match the sensor name and its namespace (repository)
     valid_runs: list[DagsterRun] = []
@@ -1396,8 +1417,9 @@ def _create_sensor_run(
         # with sensors before the tag was added to the sensor definition
         **DagsterRun.tags_for_sensor(remote_sensor),
     }
-    if run_request.run_key:
-        tags[RUN_KEY_TAG] = run_request.run_key
+    if run_key := run_request.run_key:
+        tags[RUN_KEY_TAG] = run_key
+        tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = f"sensor:name={remote_sensor.name},run_key={run_key}"
 
     log_action(
         instance,
