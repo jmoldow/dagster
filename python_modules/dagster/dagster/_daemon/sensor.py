@@ -50,7 +50,6 @@ from dagster._core.scheduler.instigation import (
 )
 from dagster._core.storage.dagster_run import DagsterRun, DagsterRunStatus, RunsFilter
 from dagster._core.storage.tags import (
-    GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG,
     RUN_KEY_TAG,
     SENSOR_NAME_TAG,
 )
@@ -1306,13 +1305,6 @@ def fetch_existing_runs(
         # do serial fetching, which has better perf than a single query with an IN clause, due to
         # how the query planner does the runs/run_tags join
         runs_filter = RunsFilter(tags={RUN_KEY_TAG: run_key})
-        # In the future, if a data migration backfills GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG onto
-        # existing sensor runs, it _could_ be _slightly_ more efficient to query on the hidden
-        # GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG. That tag is constructed in a way that is
-        # guaranteed to be globally unique, and therefore guaranteed to only return 0 or 1 rows. The
-        # regular RUN_KEY_TAG is _likely_ to be globally unique or nearly-unique, but is only
-        # guaranteed to be unique **per sensor**. The data migration would likely be complicated and
-        # risky, and is unlikely to be worth the effort.
 
         runs_with_run_keys.extend(instance.get_runs(filters=runs_filter))
 
@@ -1409,12 +1401,6 @@ def _create_sensor_run(
     }
     if run_key := run_request.run_key:
         tags[RUN_KEY_TAG] = run_key
-        # For new sensor runs, GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG should be set if-and-only if
-        # RUN_KEY_TAG exists.
-        repo_label = remote_sensor.get_remote_origin().repository_origin.get_label()
-        tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] = (
-            f"sensor:repo={repo_label},name={remote_sensor.name},run_key={run_key}"
-        )
 
     log_action(
         instance,

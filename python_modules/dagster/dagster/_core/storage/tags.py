@@ -53,7 +53,7 @@ SCHEDULED_EXECUTION_TIME_TAG = f"{HIDDEN_TAG_PREFIX}scheduled_execution_time"
 
 RUN_KEY_TAG = f"{SYSTEM_TAG_PREFIX}run_key"
 
-GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG = f"{HIDDEN_TAG_PREFIX}guaranteed_globally_unique_run_key"
+SCHEDULE_RUN_DEDUP_KEY_TAG = f"{HIDDEN_TAG_PREFIX}schedule_run_dedup_key"
 
 PRIORITY_TAG = f"{SYSTEM_TAG_PREFIX}priority"
 

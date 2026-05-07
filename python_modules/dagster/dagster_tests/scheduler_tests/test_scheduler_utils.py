@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from dagster._core.definitions.run_request import RunRequest
 from dagster._core.storage.dagster_run import RunsFilter
 from dagster._core.storage.tags import (
-    GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG,
+    SCHEDULE_RUN_DEDUP_KEY_TAG,
     RUN_KEY_TAG,
     SCHEDULE_NAME_TAG,
     SCHEDULED_EXECUTION_TIME_TAG,
@@ -76,7 +76,7 @@ def test_unique_identity_tags_for_scheduled_execution_time_no_run_key():
     assert RUN_KEY_TAG not in tags
     assert (
         unique_key
-        == f"schedule:repo=the_repo@the_location,name=my_schedule,run_key=,time={expected_iso}"
+        == f"v1:schedule{{repo=the_repo@the_location,name=my_schedule,run_key=,time={expected_iso}}}"
     )
     assert runs_filter == RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: expected_iso})
 
@@ -96,7 +96,7 @@ def test_unique_identity_tags_for_scheduled_execution_time_with_run_key():
     assert tags[RUN_KEY_TAG] == "partition_A"
     assert (
         unique_key
-        == f"schedule:repo=the_repo@the_location,name=my_schedule,run_key=partition_A,time={expected_iso}"
+        == f"v1:schedule{{repo=the_repo@the_location,name=my_schedule,run_key=partition_A,time={expected_iso}}}"
     )
     assert runs_filter == RunsFilter(tags={SCHEDULED_EXECUTION_TIME_TAG: expected_iso})
 
@@ -145,7 +145,7 @@ def test_unique_identity_tags_for_scheduled_execution_time_unique_key_differs_by
 
 
 def test_unique_identity_tags_for_scheduled_execution_time_guaranteed_unique_key_not_written_to_tags():
-    # The GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG is intentionally NOT included in the
+    # The SCHEDULE_RUN_DEDUP_KEY_TAG is intentionally NOT included in the
     # returned tags dict — it is written separately in _create_scheduler_run so that
     # _get_existing_run_for_request can compare tags without the new hidden tag
     # (which won't exist on older runs).
@@ -155,9 +155,9 @@ def test_unique_identity_tags_for_scheduled_execution_time_guaranteed_unique_key
     tags, _, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request(None)
     )
-    assert GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG not in tags
+    assert SCHEDULE_RUN_DEDUP_KEY_TAG not in tags
 
     tags_with_key, _, _ = _unique_identity_tags_for_scheduled_execution_time(
         remote_schedule, schedule_time, _make_run_request("k")
     )
-    assert GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG not in tags_with_key
+    assert SCHEDULE_RUN_DEDUP_KEY_TAG not in tags_with_key

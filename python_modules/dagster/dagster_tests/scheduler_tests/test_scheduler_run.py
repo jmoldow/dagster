@@ -39,7 +39,7 @@ from dagster._core.scheduler.instigation import (
 from dagster._core.scheduler.scheduler import DEFAULT_MAX_CATCHUP_RUNS
 from dagster._core.storage.dagster_run import DagsterRunStatus, RunsFilter
 from dagster._core.storage.tags import (
-    GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG,
+    SCHEDULE_RUN_DEDUP_KEY_TAG,
     PARTITION_NAME_TAG,
     SCHEDULED_EXECUTION_TIME_TAG,
 )
@@ -1294,13 +1294,13 @@ def test_repository_namespacing(instance: DagsterInstance, executor):
 
 
 @pytest.mark.parametrize("executor", get_schedule_executors())
-def test_guaranteed_globally_unique_run_key_tag(
+def test_schedule_run_dedup_key_tag(
     instance: DagsterInstance,
     workspace_context: WorkspaceProcessContext,
     remote_repo: RemoteRepository,
     executor,
 ):
-    """GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG is written on every scheduler run and encodes
+    """SCHEDULE_RUN_DEDUP_KEY_TAG is written on every scheduler run and encodes
     the repo label, schedule name, optional run_key, and execution time.
     Runs can be uniquely looked up by this tag.
     """
@@ -1336,13 +1336,13 @@ def test_guaranteed_globally_unique_run_key_tag(
 
         # Tag must be present and encode empty run_key
         expected_tag_no_key = (
-            f"schedule:repo={repo_label},name=simple_schedule,run_key=,time={expected_exec_iso}"
+            f"v1:schedule{{repo={repo_label},name=simple_schedule,run_key=,time={expected_exec_iso}}}"
         )
-        assert simple_run.tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] == expected_tag_no_key
+        assert simple_run.tags[SCHEDULE_RUN_DEDUP_KEY_TAG] == expected_tag_no_key
 
         # Run can be looked up directly by this tag
         by_tag = instance.get_runs(
-            RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: expected_tag_no_key})
+            RunsFilter(tags={SCHEDULE_RUN_DEDUP_KEY_TAG: expected_tag_no_key})
         )
         assert len(by_tag) == 1
         assert by_tag[0].run_id == simple_run.run_id
@@ -1357,16 +1357,16 @@ def test_guaranteed_globally_unique_run_key_tag(
         for run in keyed_runs:
             run_key = run.tags["dagster/run_key"]
             expected_tag = (
-                f"schedule:repo={repo_label_keys}"
+                f"v1:schedule{{repo={repo_label_keys}"
                 f",name=multi_run_list_schedule"
                 f",run_key={run_key}"
-                f",time={expected_exec_iso}"
+                f",time={expected_exec_iso}}}"
             )
-            assert run.tags[GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG] == expected_tag
+            assert run.tags[SCHEDULE_RUN_DEDUP_KEY_TAG] == expected_tag
 
             # Each run can be uniquely looked up by the tag
             by_tag = instance.get_runs(
-                RunsFilter(tags={GUARANTEED_GLOBALLY_UNIQUE_RUN_KEY_TAG: expected_tag})
+                RunsFilter(tags={SCHEDULE_RUN_DEDUP_KEY_TAG: expected_tag})
             )
             assert len(by_tag) == 1
             assert by_tag[0].run_id == run.run_id
