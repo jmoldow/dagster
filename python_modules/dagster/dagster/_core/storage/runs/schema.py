@@ -163,7 +163,14 @@ KeyValueStoreTable = db.Table(
     db.Column("value", db.Text),
 )
 
-db.Index("idx_run_tags", RunTagsTable.c.key, RunTagsTable.c.value, mysql_length=64)
+db.Index(
+    "idx_run_tags_run_id",
+    RunTagsTable.c.key,
+    RunTagsTable.c.value,
+    RunTagsTable.c.run_id,
+    unique=True,
+    mysql_length={"key": 64, "value": 64, "run_id": 255},
+)
 db.Index(
     "idx_run_tags_run_idx", RunTagsTable.c.run_id, RunTagsTable.c.id, mysql_length={"run_id": 255}
 )

@@ -1199,6 +1199,36 @@ def test_add_run_tags_run_id_idx(hostname, conn_string):
             assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
 
 
+def test_re_add_run_tags_run_id_idx(hostname, conn_string):
+    _reconstruct_from_file(
+        hostname,
+        conn_string,
+        file_relative_path(
+            __file__,
+            "snapshot_1_13_3_re_add_run_tags_run_id_idx/postgres/pg_dump.txt",
+        ),
+    )
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        with open(file_relative_path(__file__, "dagster.yaml"), encoding="utf8") as template_fd:
+            with open(os.path.join(tempdir, "dagster.yaml"), "w", encoding="utf8") as target_fd:
+                template = template_fd.read().format(hostname=hostname)
+                target_fd.write(template)
+
+        with DagsterInstance.from_config(tempdir) as instance:
+            # Before migration
+            assert "run_tags" in get_tables(instance)
+            assert "idx_run_tags" in get_indexes(instance, "run_tags")
+            assert "idx_run_tags_run_id" not in get_indexes(instance, "run_tags")
+
+            # After upgrade
+            instance.upgrade()
+
+            assert "run_tags" in get_tables(instance)
+            assert "idx_run_tags" not in get_indexes(instance, "run_tags")
+            assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
+
+
 def test_add_backfill_end_timestamp(hostname, conn_string):
     _reconstruct_from_file(
         hostname,
