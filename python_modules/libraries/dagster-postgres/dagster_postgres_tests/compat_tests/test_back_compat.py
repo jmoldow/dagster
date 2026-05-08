@@ -1281,6 +1281,99 @@ def test_re_add_run_tags_run_id_idx_start_from_fresh_schema_with_duplicate_data(
                         instance.upgrade()
 
 
+def test_re_add_run_tags_run_id_idx_start_from_damaged_schema_with_duplicate_data_can_repair_index(hostname, conn_string):
+    """Simulate migration 047 leaving a damaged (indisvalid=False) index, then show migration 051 repairs it.
+
+    Scenario:
+    1. Start from a snapshot that has duplicate run_tags data and no idx_run_tags_run_id.
+    2. Programmatically run CREATE UNIQUE INDEX CONCURRENTLY, which fails due to duplicates and
+       leaves idx_run_tags_run_id in pg_index with indisvalid=False (the "damaged" state).
+    3. Delete the duplicate row so no constraint violations remain.
+    4. Run instance.upgrade() (migration 051), which detects the invalid index, drops it, and
+       re-creates it successfully.
+    5. Verify that idx_run_tags_run_id is now present and fully valid in pg_index.
+    """
+    from dagster._core.storage.runs.schema import RunTagsTable
+
+    # Step 1: Start from snapshot with duplicate data and no idx_run_tags_run_id
+    _reconstruct_from_file(
+        hostname,
+        conn_string,
+        file_relative_path(
+            __file__,
+            "snapshot_1_13_4_re_add_run_tags_run_id_idx_start_from_fresh_schema_with_duplicate_data/postgres/pg_dump.txt",
+        ),
+    )
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        with open(file_relative_path(__file__, "dagster.yaml"), encoding="utf8") as template_fd:
+            with open(os.path.join(tempdir, "dagster.yaml"), "w", encoding="utf8") as target_fd:
+                template = template_fd.read().format(hostname=hostname)
+                target_fd.write(template)
+
+        with DagsterInstance.from_config(tempdir) as instance:
+            # Step 2: Verify pre-damaged state: idx_run_tags present, idx_run_tags_run_id absent
+            assert "run_tags" in get_tables(instance)
+            assert "idx_run_tags" in get_indexes(instance, "run_tags")
+            assert "idx_run_tags_run_id" not in get_indexes(instance, "run_tags")
+            assert _get_table_row_count(instance.run_storage, RunTagsTable) == 2
+
+            # Step 3.a: Simulate what migration 047 would have done: attempt to create the unique
+            # index CONCURRENTLY, which fails due to duplicate data and leaves an invalid index.
+            with instance.run_storage.connect() as conn:  # ty: ignore[unresolved-attribute]
+                with pytest.raises(db.exc.IntegrityError, match=re.escape("""(psycopg2.errors.UniqueViolation) could not create unique index "idx_run_tags_run_id"\nDETAIL:  Key (key, value, run_id)=(foo, bar, abcd-1234) is duplicated.\n\n[SQL: CREATE UNIQUE INDEX CONCURRENTLY idx_run_tags_run_id ON run_tags (key, value, run_id)]""")):
+                    conn.execute(db.text(
+                        "CREATE UNIQUE INDEX CONCURRENTLY idx_run_tags_run_id"
+                        " ON run_tags (key, value, run_id)"
+                    ))
+
+            # Step 3.b: Verify the "damaged" state: idx_run_tags_run_id exists but is invalid
+            assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
+            with instance.run_storage.connect() as conn:  # ty: ignore[unresolved-attribute]
+                result = conn.execute(db.text(
+                    "SELECT indisvalid FROM pg_index"
+                    " JOIN pg_class ON pg_class.oid = pg_index.indexrelid"
+                    " WHERE pg_class.relname = 'idx_run_tags_run_id'"
+                ))
+                row = result.fetchone()
+            assert row is not None
+            assert not row[0]  # indisvalid is False — index is damaged
+
+            # Step 4: Delete the duplicate row (keep one copy)
+            query = db_select([RunTagsTable.c.key, RunTagsTable.c.value, RunTagsTable.c.run_id, RunTagsTable.c.id]).select_from(RunTagsTable)
+            with instance.run_storage.connect() as conn:  # ty: ignore[unresolved-attribute]
+                rows = conn.execute(query).fetchall()
+            assert rows == [("foo", "bar", "abcd-1234", 1), ("foo", "bar", "abcd-1234", 2)]
+
+            delete_query = RunTagsTable.delete().where(RunTagsTable.c.id == 2)
+            with instance.run_storage.connect() as conn:  # ty: ignore[unresolved-attribute]
+                conn.execute(delete_query)
+
+            assert _get_table_row_count(instance.run_storage, RunTagsTable) == 1
+
+            # Step 5: Run migration 051, which detects the invalid index, drops it, and re-creates it
+            instance.upgrade()
+
+            # Step 6: Verify the index is now valid and the old index is gone
+            assert "run_tags" in get_tables(instance)
+            assert "idx_run_tags" not in get_indexes(instance, "run_tags")
+            assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
+
+            # Verify the index is valid in pg_index
+            with instance.run_storage.connect() as conn:  # ty: ignore[unresolved-attribute]
+                result = conn.execute(db.text(
+                    "SELECT indisvalid, indisready, indislive, indisunique FROM pg_index"
+                    " JOIN pg_class ON pg_class.oid = pg_index.indexrelid"
+                    " WHERE pg_class.relname = 'idx_run_tags_run_id'"
+                ))
+                row = result.fetchone()
+            assert row is not None
+            assert row[0]  # indisvalid is True
+            assert row[1]  # indisready is True
+            assert row[2]  # indislive is True
+            assert row[3]  # indisunique is True
+
+
 def test_re_add_run_tags_run_id_idx_start_from_migration_history(hostname, conn_string):
     """Simulate a database that has been continuously migrated from an old Dagster install.
 
