@@ -1,6 +1,6 @@
--- MySQL dump 10.13  Distrib 8.4.3, for macos14.4 (arm64)
+-- MySQL dump 10.13  Distrib 8.3.0, for Linux (aarch64)
 --
--- Host: 127.0.0.1    Database: test
+-- Host: localhost    Database: test
 -- ------------------------------------------------------
 -- Server version	8.3.0
 
@@ -34,7 +34,7 @@ CREATE TABLE `alembic_version` (
 
 LOCK TABLES `alembic_version` WRITE;
 /*!40000 ALTER TABLE `alembic_version` DISABLE KEYS */;
-INSERT INTO `alembic_version` VALUES ('16e3655b4d9b');
+INSERT INTO `alembic_version` VALUES ('29b539ebc72a');
 /*!40000 ALTER TABLE `alembic_version` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -118,8 +118,8 @@ CREATE TABLE `asset_event_tags` (
   `value` text,
   `event_timestamp` timestamp(6) NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_asset_event_tags_event_id` (`event_id`),
-  KEY `idx_asset_event_tags` (`asset_key`(64),`key`(64),`value`(64))
+  KEY `idx_asset_event_tags` (`asset_key`(64),`key`(64),`value`(64)),
+  KEY `idx_asset_event_tags_event_id` (`event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -149,7 +149,7 @@ CREATE TABLE `asset_keys` (
   `last_materialization_timestamp` timestamp(6) NULL DEFAULT NULL,
   `tags` text,
   `create_timestamp` datetime(6) DEFAULT CURRENT_TIMESTAMP(6),
-  `cached_status_data` text,
+  `cached_status_data` longtext,
   PRIMARY KEY (`id`),
   UNIQUE KEY `asset_key` (`asset_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -202,16 +202,16 @@ CREATE TABLE `bulk_actions` (
   `key` varchar(32) NOT NULL,
   `status` varchar(255) NOT NULL,
   `timestamp` timestamp(6) NOT NULL,
-  `body` text,
+  `body` longtext,
   `action_type` varchar(32) DEFAULT NULL,
   `selector_id` text,
   `job_name` text,
   PRIMARY KEY (`id`),
   UNIQUE KEY `key` (`key`),
-  KEY `idx_bulk_actions_status` (`status`(32)),
+  KEY `idx_bulk_actions_selector_id` (`selector_id`(64)),
   KEY `idx_bulk_actions_action_type` (`action_type`),
   KEY `idx_bulk_actions` (`key`),
-  KEY `idx_bulk_actions_selector_id` (`selector_id`(64))
+  KEY `idx_bulk_actions_status` (`status`(32))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -235,6 +235,7 @@ CREATE TABLE `concurrency_limits` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `concurrency_key` varchar(512) NOT NULL,
   `limit` int NOT NULL,
+  `using_default_limit` tinyint(1) NOT NULL DEFAULT '0',
   `update_timestamp` datetime(6) DEFAULT CURRENT_TIMESTAMP(6),
   `create_timestamp` datetime(6) DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
@@ -437,10 +438,10 @@ CREATE TABLE `job_ticks` (
   `create_timestamp` datetime(6) DEFAULT CURRENT_TIMESTAMP(6),
   `update_timestamp` datetime(6) DEFAULT CURRENT_TIMESTAMP(6),
   PRIMARY KEY (`id`),
-  KEY `idx_job_tick_timestamp` (`job_origin_id`,`timestamp`),
+  KEY `ix_job_ticks_job_origin_id` (`job_origin_id`),
   KEY `idx_job_tick_status` (`job_origin_id`(32),`status`(32)),
   KEY `idx_tick_selector_timestamp` (`selector_id`,`timestamp`),
-  KEY `ix_job_ticks_job_origin_id` (`job_origin_id`)
+  KEY `idx_job_tick_timestamp` (`job_origin_id`,`timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -595,9 +596,9 @@ CREATE TABLE `runs` (
   KEY `fk_runs_snapshot_id_snapshots_snapshot_id` (`snapshot_id`),
   KEY `idx_run_partitions` (`partition_set`(64),`partition`(64)),
   KEY `idx_run_status` (`status`(32)),
-  KEY `idx_runs_by_job` (`pipeline_name`(255),`id`),
-  KEY `idx_run_range` (`status`(32),`update_timestamp`,`create_timestamp`),
   KEY `idx_runs_by_backfill_id` (`backfill_id`,`id`),
+  KEY `idx_run_range` (`status`(32),`update_timestamp`,`create_timestamp`),
+  KEY `idx_runs_by_job` (`pipeline_name`(255),`id`),
   CONSTRAINT `fk_runs_snapshot_id_snapshots_snapshot_id` FOREIGN KEY (`snapshot_id`) REFERENCES `snapshots` (`snapshot_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -625,7 +626,7 @@ CREATE TABLE `secondary_indexes` (
   `migration_completed` datetime(6) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -634,7 +635,7 @@ CREATE TABLE `secondary_indexes` (
 
 LOCK TABLES `secondary_indexes` WRITE;
 /*!40000 ALTER TABLE `secondary_indexes` DISABLE KEYS */;
-INSERT INTO `secondary_indexes` VALUES (1,'run_partitions','2024-11-15 12:32:29.158543','2024-11-15 13:32:29.899885'),(2,'run_repo_label_tags','2024-11-15 12:32:29.183724','2024-11-15 13:32:29.926257'),(3,'bulk_action_types','2024-11-15 12:32:29.210778','2024-11-15 13:32:29.952917'),(4,'run_backfill_id','2024-11-15 12:32:29.248236','2024-11-15 13:32:29.988794'),(5,'backfill_job_name_and_tags','2024-11-15 12:32:29.281599','2024-11-15 13:32:30.022194'),(6,'run_start_end_overwritten','2024-11-15 12:32:29.331170','2024-11-15 13:32:30.071656'),(7,'asset_key_table','2024-11-15 12:32:29.595566','2024-11-15 13:32:30.336929'),(8,'asset_key_index_columns','2024-11-15 12:32:29.623227','2024-11-15 13:32:30.364828'),(9,'schedule_jobs_selector_id','2024-11-15 12:32:29.831446','2024-11-15 13:32:30.573486'),(10,'schedule_ticks_selector_id','2024-11-15 12:32:29.900756','2024-11-15 13:32:30.641064');
+INSERT INTO `secondary_indexes` VALUES (1,'run_partitions','2026-05-08 02:19:44.839315','2026-05-07 19:19:44.835894'),(2,'run_repo_label_tags','2026-05-08 02:19:44.852818','2026-05-07 19:19:44.849795'),(3,'bulk_action_types','2026-05-08 02:19:44.865656','2026-05-07 19:19:44.862964'),(4,'run_backfill_id','2026-05-08 02:19:44.882783','2026-05-07 19:19:44.879736'),(5,'backfill_job_name_and_tags','2026-05-08 02:19:44.895835','2026-05-07 19:19:44.892843'),(6,'backfill_end_timestamp','2026-05-08 02:19:44.908392','2026-05-07 19:19:44.905647'),(7,'run_start_end_overwritten','2026-05-08 02:19:44.927975','2026-05-07 19:19:44.924649'),(8,'asset_key_table','2026-05-08 02:19:45.072463','2026-05-07 19:19:45.068792'),(9,'asset_key_index_columns','2026-05-08 02:19:45.085805','2026-05-07 19:19:45.082905'),(10,'schedule_jobs_selector_id','2026-05-08 02:19:45.211200','2026-05-07 19:19:45.207309'),(11,'schedule_ticks_selector_id','2026-05-08 02:19:45.241704','2026-05-07 19:19:45.238231');
 /*!40000 ALTER TABLE `secondary_indexes` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -673,4 +674,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2024-11-15 13:39:31
+-- Dump completed on 2026-05-08  2:19:46

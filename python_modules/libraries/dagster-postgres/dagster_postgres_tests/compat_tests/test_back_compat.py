@@ -1199,13 +1199,14 @@ def test_add_run_tags_run_id_idx(hostname, conn_string):
             assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
 
 
-def test_re_add_run_tags_run_id_idx(hostname, conn_string):
+def test_re_add_run_tags_run_id_idx_start_from_fresh_schema(hostname, conn_string):
+    """This snapshot simulates a database that was initialized from schema.py on version 1.13.4."""
     _reconstruct_from_file(
         hostname,
         conn_string,
         file_relative_path(
             __file__,
-            "snapshot_1_13_3_re_add_run_tags_run_id_idx/postgres/pg_dump.txt",
+            "snapshot_1_13_4_re_add_run_tags_run_id_idx_start_from_fresh_schema/postgres/pg_dump.txt",
         ),
     )
 
@@ -1224,6 +1225,94 @@ def test_re_add_run_tags_run_id_idx(hostname, conn_string):
             # After upgrade
             instance.upgrade()
 
+            assert "run_tags" in get_tables(instance)
+            assert "idx_run_tags" not in get_indexes(instance, "run_tags")
+            assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
+
+
+def test_re_add_run_tags_run_id_idx_start_from_fresh_schema_with_duplicate_data(hostname, conn_string):
+    """This snapshot simulates duplicate data that violates the UNIQUE KEY constraint.
+
+    Specifically, contains these two rows:
+
+        COPY public.run_tags (id, run_id, key, value) FROM stdin;
+        1	abcd-1234	foo	bar
+        2	abcd-1234	foo	bar
+
+    Adding the unique key cannot succeed. This tests verifies that the database is not left with an
+    invalid index, and that re-running the migration fails again, rather than being a no-op and
+    succeeding, both of which were bugs in 047_add_run_tags_run_id_idx.
+    """
+    from dagster._core.storage.runs.schema import RunTagsTable
+    _reconstruct_from_file(
+        hostname,
+        conn_string,
+        file_relative_path(
+            __file__,
+            "snapshot_1_13_4_re_add_run_tags_run_id_idx_start_from_fresh_schema_with_duplicate_data/postgres/pg_dump.txt",
+        ),
+    )
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        with open(file_relative_path(__file__, "dagster.yaml"), encoding="utf8") as template_fd:
+            with open(os.path.join(tempdir, "dagster.yaml"), "w", encoding="utf8") as target_fd:
+                template = template_fd.read().format(hostname=hostname)
+                target_fd.write(template)
+
+        with DagsterInstance.from_config(tempdir) as instance:
+            for attempt in range(4):
+                # Before migration, and also after failed attempts, idx_run_tags_run_id should not
+                # exist.
+                assert "run_tags" in get_tables(instance)
+                assert "idx_run_tags" in get_indexes(instance, "run_tags")
+                assert "idx_run_tags_run_id" not in get_indexes(instance, "run_tags")
+                assert _get_table_row_count(instance.run_storage, RunTagsTable) == 2
+                query = db_select([RunTagsTable.c.key, RunTagsTable.c.value, RunTagsTable.c.run_id, RunTagsTable.c.id]).select_from(RunTagsTable)
+                with instance.run_storage.connect() as conn:  # ty: ignore[unresolved-attribute]
+                    rows = conn.execute(query).fetchall()
+                assert rows == [("foo", "bar", "abcd-1234", 1), ("foo", "bar", "abcd-1234", 2)]
+
+                if attempt < 3:
+                    # Attempt upgrade. All retries should fail. Unlike 047_add_run_tags_run_id_idx,
+                    # where the index would appear to be partially-created, making the retry succeed
+                    # as a no-op. For this new migration, the migration should automatically roll
+                    # back if it fails.
+                    with pytest.raises(db.exc.IntegrityError, match=re.escape("""(psycopg2.errors.UniqueViolation) could not create unique index "idx_run_tags_run_id"\nDETAIL:  Key (key, value, run_id)=(foo, bar, abcd-1234) is duplicated.\n\n[SQL: CREATE UNIQUE INDEX CONCURRENTLY idx_run_tags_run_id ON run_tags (key, value, run_id)]""")):
+                        instance.upgrade()
+
+
+def test_re_add_run_tags_run_id_idx_start_from_migration_history(hostname, conn_string):
+    """Simulate a database that has been continuously migrated from an old Dagster install.
+
+    In particular, this database would've been initialized prior to 047_add_run_tags_run_id_idx, and
+    then migrated through 047_add_run_tags_run_id_idx to the latest migration
+    29b539ebc72a_use_longtext_on_bulk_actions_body_in_.
+    """
+    _reconstruct_from_file(
+        hostname,
+        conn_string,
+        file_relative_path(
+            __file__,
+            "snapshot_1_13_4_re_add_run_tags_run_id_idx_start_from_migration_history/postgres/pg_dump.txt",
+        ),
+    )
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        with open(file_relative_path(__file__, "dagster.yaml"), encoding="utf8") as template_fd:
+            with open(os.path.join(tempdir, "dagster.yaml"), "w", encoding="utf8") as target_fd:
+                template = template_fd.read().format(hostname=hostname)
+                target_fd.write(template)
+
+        with DagsterInstance.from_config(tempdir) as instance:
+            # Before migration - 047_add_run_tags_run_id_idx previously ran successfully
+            assert "run_tags" in get_tables(instance)
+            assert "idx_run_tags" not in get_indexes(instance, "run_tags")
+            assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
+
+            # After upgrade
+            instance.upgrade()
+
+            # No state should have changed
             assert "run_tags" in get_tables(instance)
             assert "idx_run_tags" not in get_indexes(instance, "run_tags")
             assert "idx_run_tags_run_id" in get_indexes(instance, "run_tags")
