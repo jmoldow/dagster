@@ -29,6 +29,7 @@ from dagster._core.storage.sql import (
 from dagster._core.storage.sqlite import SQLITE_BUSY_TIMEOUT_SECONDS, create_db_conn_string
 from dagster._serdes import ConfigurableClass, ConfigurableClassData
 from dagster._utils import mkdir_p
+from dagster._utils.cached_method import cached_method
 
 SQLITE_EVENT_LOG_FILENAME = "event_log"
 
@@ -122,6 +123,7 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self):
         return self._connect()
 
+    @cached_method
     def has_table(self, table_name: str) -> bool:
         engine = create_engine(
             self._conn_string,
@@ -162,7 +164,7 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
     @cached_property
     def supports_global_concurrency_limits(self) -> bool:
-        return self.has_table("concurrency_limits")
+        return self._has_table_cached("concurrency_limits")
 
     def on_modified(self):
         keys = [

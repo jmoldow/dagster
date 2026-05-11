@@ -201,12 +201,12 @@ def test_asset_lazy_migration():
     with copy_directory(src_dir) as test_dir:
         with DagsterInstance.from_ref(InstanceRef.from_dir(test_dir)) as instance:
             storage = instance.event_log_storage
-            assert not storage.has_asset_key_index_cols()  # ty: ignore[unresolved-attribute]
+            assert not storage.has_asset_key_index_cols  # ty: ignore[unresolved-attribute]
             assert not storage.has_secondary_index(ASSET_KEY_INDEX_COLS)  # ty: ignore[unresolved-attribute]
 
             # run the schema migration without reindexing the asset keys
             storage.upgrade()
-            assert storage.has_asset_key_index_cols()  # ty: ignore[unresolved-attribute]
+            assert storage.has_asset_key_index_cols  # ty: ignore[unresolved-attribute]
             assert not storage.has_secondary_index(ASSET_KEY_INDEX_COLS)  # ty: ignore[unresolved-attribute]
 
             # fetch all asset keys

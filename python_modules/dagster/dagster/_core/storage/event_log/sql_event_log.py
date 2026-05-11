@@ -101,6 +101,7 @@ from dagster._core.types.pagination import PaginatedResults, StorageIdCursor
 from dagster._serdes import deserialize_value, serialize_value
 from dagster._time import datetime_from_timestamp, get_current_timestamp, utc_datetime_from_naive
 from dagster._utils import PrintFn
+from dagster._utils.cached_method import cached_method
 from dagster._utils.concurrency import (
     ClaimedSlotInfo,
     ConcurrencyClaimStatus,
@@ -153,6 +154,12 @@ class SqlEventLogStorage(EventLogStorage):
     sharding, while maintaining the ability to do cross-run queries
     """
 
+    _has_table_cache: dict[str, bool]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._has_table_cache = {}
+
     @abstractmethod
     def run_connection(self, run_id: str | None) -> ContextManager[Connection]:
         """Context manager yielding a connection to access the event logs for a specific run.
@@ -185,6 +192,13 @@ class SqlEventLogStorage(EventLogStorage):
     @abstractmethod
     def has_table(self, table_name: str) -> bool:
         """This method checks if a table exists in the database."""
+
+    def _has_table_cached(self, table_name: str) -> bool:
+        if table_name in self._has_table_cache:
+            return self._has_table_cache[table_name]
+        has_table = self.has_table(table_name)
+        self._has_table_cache[table_name] = has_table
+        return has_table
 
     def prepare_insert_event(self, event: EventLogEntry) -> Any:
         """Helper method for preparing the event log SQL insertion statement.  Abstracted away to
@@ -227,13 +241,15 @@ class SqlEventLogStorage(EventLogStorage):
             "partition": partition,
         }
 
-    def has_asset_key_col(self, column_name: str) -> bool:
+    @cached_method
+    def _has_asset_key_col(self, column_name: str) -> bool:
         with self.index_connection() as conn:
             column_names = [x.get("name") for x in db.inspect(conn).get_columns(AssetKeyTable.name)]
             return column_name in column_names
 
+    @cached_property
     def has_asset_key_index_cols(self) -> bool:
-        return self.has_asset_key_col("last_materialization_timestamp")
+        return self._has_asset_key_col("last_materialization_timestamp")
 
     def store_asset_event(self, event: EventLogEntry, event_id: int):
         check.inst_param(event, "event", EventLogEntry)
@@ -253,7 +269,7 @@ class SqlEventLogStorage(EventLogStorage):
         #
         # https://github.com/dagster-io/dagster/issues/3945
 
-        values = self._get_asset_entry_values(event, event_id, self.has_asset_key_index_cols())
+        values = self._get_asset_entry_values(event, event_id, self.has_asset_key_index_cols)
         if not values:
             return
         insert_statement = AssetKeyTable.insert().values(
@@ -352,7 +368,7 @@ class SqlEventLogStorage(EventLogStorage):
         # Only execute if tags table exists. This is to support OSS users who have not yet run the
         # migration to create the table. On read, we will throw an error if the table does not
         # exist.
-        if len(all_values) > 0 and self.has_table(AssetEventTagsTable.name):
+        if len(all_values) > 0 and self._has_table_cached(AssetEventTagsTable.name):
             with self.index_connection() as conn:
                 conn.execute(AssetEventTagsTable.insert(), all_values)
 
@@ -634,22 +650,22 @@ class SqlEventLogStorage(EventLogStorage):
             conn.execute(SqlEventLogStorageTable.delete())
             conn.execute(AssetKeyTable.delete())
 
-            if self.has_table("asset_event_tags"):
+            if self._has_table_cached("asset_event_tags"):
                 conn.execute(AssetEventTagsTable.delete())
 
-            if self.has_table("dynamic_partitions"):
+            if self._has_table_cached("dynamic_partitions"):
                 conn.execute(DynamicPartitionsTable.delete())
 
-            if self.has_table("concurrency_limits"):
+            if self._has_table_cached("concurrency_limits"):
                 conn.execute(ConcurrencyLimitsTable.delete())
 
-            if self.has_table("concurrency_slots"):
+            if self._has_table_cached("concurrency_slots"):
                 conn.execute(ConcurrencySlotsTable.delete())
 
-            if self.has_table("pending_steps"):
+            if self._has_table_cached("pending_steps"):
                 conn.execute(PendingStepsTable.delete())
 
-            if self.has_table("asset_check_executions"):
+            if self._has_table_cached("asset_check_executions"):
                 conn.execute(AssetCheckExecutionsTable.delete())
 
         self._wipe_index()
@@ -659,19 +675,19 @@ class SqlEventLogStorage(EventLogStorage):
             conn.execute(SqlEventLogStorageTable.delete())
             conn.execute(AssetKeyTable.delete())
 
-            if self.has_table("asset_event_tags"):
+            if self._has_table_cached("asset_event_tags"):
                 conn.execute(AssetEventTagsTable.delete())
 
-            if self.has_table("dynamic_partitions"):
+            if self._has_table_cached("dynamic_partitions"):
                 conn.execute(DynamicPartitionsTable.delete())
 
-            if self.has_table("concurrency_slots"):
+            if self._has_table_cached("concurrency_slots"):
                 conn.execute(ConcurrencySlotsTable.delete())
 
-            if self.has_table("pending_steps"):
+            if self._has_table_cached("pending_steps"):
                 conn.execute(PendingStepsTable.delete())
 
-            if self.has_table("asset_check_executions"):
+            if self._has_table_cached("asset_check_executions"):
                 conn.execute(AssetCheckExecutionsTable.delete())
 
     def delete_events(self, run_id: str) -> None:
@@ -1226,11 +1242,13 @@ class SqlEventLogStorage(EventLogStorage):
                 )
         return results
 
+    @cached_method
     def can_read_asset_status_cache(self) -> bool:
-        return self.has_asset_key_col("cached_status_data")
+        return self._has_asset_key_col("cached_status_data")
 
+    @cached_method
     def can_write_asset_status_cache(self) -> bool:
-        return self.has_asset_key_col("cached_status_data")
+        return self._has_asset_key_col("cached_status_data")
 
     def wipe_asset_cached_status(self, asset_key: AssetKey) -> None:
         if self.can_read_asset_status_cache():
@@ -1437,7 +1455,7 @@ class SqlEventLogStorage(EventLogStorage):
             columns.extend([AssetKeyTable.c.cached_status_data])
 
         is_partial_query = asset_keys is not None or bool(prefix) or bool(limit) or bool(cursor)
-        if self.has_asset_key_index_cols() and not is_partial_query:
+        if self.has_asset_key_index_cols and not is_partial_query:
             # if the schema has been migrated, fetch the last_materialization_timestamp to see if
             # we can lazily migrate the data table
             columns.append(AssetKeyTable.c.last_materialization_timestamp)
@@ -1550,7 +1568,7 @@ class SqlEventLogStorage(EventLogStorage):
         }  # type: ignore
 
     def _can_mark_assets_as_migrated(self, rows):
-        if not self.has_asset_key_index_cols():
+        if not self.has_asset_key_index_cols:
             return False
 
         if self.has_secondary_index(ASSET_KEY_INDEX_COLS):
@@ -1672,7 +1690,7 @@ class SqlEventLogStorage(EventLogStorage):
         )
         filter_event_id = check.opt_int_param(filter_event_id, "filter_event_id")
 
-        if not self.has_table(AssetEventTagsTable.name):
+        if not self._has_table_cached(AssetEventTagsTable.name):
             raise DagsterInvalidInvocationError(
                 "In order to search for asset event tags, you must run "
                 "`dagster instance migrate` to create the AssetEventTags table."
@@ -1760,7 +1778,7 @@ class SqlEventLogStorage(EventLogStorage):
             "asset_details": serialize_value(AssetDetails(last_wipe_timestamp=wipe_timestamp)),
             "last_run_id": None,
         }
-        if self.has_asset_key_index_cols():
+        if self.has_asset_key_index_cols:
             values.update(
                 dict(
                     wipe_timestamp=datetime_from_timestamp(wipe_timestamp),
@@ -1782,7 +1800,7 @@ class SqlEventLogStorage(EventLogStorage):
                     AssetKeyTable.c.asset_key == asset_key.to_string(),
                 )
             )
-            if self.has_table("asset_check_executions"):
+            if self._has_table_cached("asset_check_executions"):
                 conn.execute(
                     AssetCheckExecutionsTable.delete().where(
                         AssetCheckExecutionsTable.c.asset_key == asset_key.to_string()
@@ -2055,7 +2073,7 @@ class SqlEventLogStorage(EventLogStorage):
     def _check_partitions_table(self) -> None:
         # Guards against cases where the user is not running the latest migration for
         # partitions storage. Should be updated when the partitions storage schema changes.
-        if not self.has_table("dynamic_partitions"):
+        if not self._has_table_cached("dynamic_partitions"):
             raise DagsterInvalidInvocationError(
                 "Using dynamic partitions definitions requires the dynamic partitions table, which"
                 " currently does not exist. Add this table by running `dagster"
@@ -2180,13 +2198,13 @@ class SqlEventLogStorage(EventLogStorage):
 
     @cached_property
     def supports_global_concurrency_limits(self) -> bool:
-        return self.has_table(ConcurrencySlotsTable.name)
+        return self._has_table_cached(ConcurrencySlotsTable.name)
 
     @cached_property
     def has_default_pool_limit_col(self) -> bool:
         # This table was added later, and to avoid forcing a migration
         # we handle in the code if its been added or not.
-        if not self.has_table(ConcurrencyLimitsTable.name):
+        if not self._has_table_cached(ConcurrencyLimitsTable.name):
             return False
 
         with self.index_connection() as conn:
@@ -2199,7 +2217,7 @@ class SqlEventLogStorage(EventLogStorage):
     def has_concurrency_limits_table(self) -> bool:
         # This table was added later, and to avoid forcing a migration
         # we handle in the code if its been added or not.
-        return self.has_table(ConcurrencyLimitsTable.name)
+        return self._has_table_cached(ConcurrencyLimitsTable.name)
 
     def _reconcile_concurrency_limits_from_slots(self) -> None:
         """Helper function that can be reconciles the concurrency limits table from the concurrency
@@ -3381,7 +3399,7 @@ class SqlEventLogStorage(EventLogStorage):
 
     @property
     def supports_asset_checks(self):
-        return self.has_table(AssetCheckExecutionsTable.name)
+        return self._has_table_cached(AssetCheckExecutionsTable.name)
 
     def get_latest_planned_materialization_info(
         self,

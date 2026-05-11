@@ -61,6 +61,7 @@ from dagster._core.storage.sqlite import (
 )
 from dagster._serdes import ConfigurableClass, ConfigurableClassData
 from dagster._utils import mkdir_p
+from dagster._utils.cached_method import cached_method
 
 if TYPE_CHECKING:
     from dagster._core.storage.sqlite_storage import SqliteStorageConfig
@@ -161,6 +162,7 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             if os.path.splitext(os.path.basename(filename))[0] != INDEX_SHARD_NAME
         ]
 
+    @cached_method
     def has_table(self, table_name: str) -> bool:
         conn_string = self.conn_string_for_shard(INDEX_SHARD_NAME)
         engine = create_engine(
@@ -525,7 +527,7 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
     @cached_property
     def supports_global_concurrency_limits(self) -> bool:
-        return self.has_table("concurrency_limits")
+        return self._has_table_cached("concurrency_limits")
 
 
 class SqliteEventLogStorageWatchdog(PatternMatchingEventHandler):

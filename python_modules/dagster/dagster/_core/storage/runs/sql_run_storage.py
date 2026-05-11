@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
+from functools import cached_property
 from typing import Any, Callable, ContextManager, NamedTuple, cast  # noqa: UP035
 
 import sqlalchemy as db
@@ -133,7 +134,7 @@ class SqlRunStorage(RunStorage):
             "partition": partition,
             "partition_set": partition_set,
         }
-        if self.has_backfill_id_column():
+        if self.has_backfill_id_column:
             values["backfill_id"] = dagster_run.tags.get(BACKFILL_ID_TAG)
         if run_creation_time:
             values["create_timestamp"] = run_creation_time
@@ -188,7 +189,7 @@ class SqlRunStorage(RunStorage):
 
         new_job_status = EVENT_TYPE_TO_PIPELINE_RUN_STATUS[event.event_type]
 
-        run_stats_cols_in_index = self.has_run_stats_index_cols()
+        run_stats_cols_in_index = self.has_run_stats_index_cols
 
         kwargs = {}
 
@@ -416,7 +417,7 @@ class SqlRunStorage(RunStorage):
 
         columns = ["id", "run_body", "status", "create_timestamp", "update_timestamp"]
 
-        if self.has_run_stats_index_cols():
+        if self.has_run_stats_index_cols:
             columns += ["start_time", "end_time"]
         # only fetch columns we use to build RunRecord
         query = self._runs_query(
@@ -668,7 +669,7 @@ class SqlRunStorage(RunStorage):
         )
 
     def get_run_partition_data(self, runs_filter: RunsFilter) -> Sequence[RunPartitionData]:
-        if self.has_built_index(RUN_PARTITIONS) and self.has_run_stats_index_cols():
+        if self.has_built_index(RUN_PARTITIONS) and self.has_run_stats_index_cols:
             query = self._runs_query(
                 filters=runs_filter,
                 columns=["run_id", "status", "start_time", "end_time", "partition"],
@@ -788,11 +789,13 @@ class SqlRunStorage(RunStorage):
 
     # Checking for migrations
 
+    @cached_property
     def has_run_stats_index_cols(self) -> bool:
         with self.connect() as conn:
             column_names = [x.get("name") for x in db.inspect(conn).get_columns(RunsTable.name)]
             return "start_time" in column_names and "end_time" in column_names
 
+    @cached_property
     def has_bulk_actions_selector_cols(self) -> bool:
         with self.connect() as conn:
             column_names = [
@@ -800,11 +803,13 @@ class SqlRunStorage(RunStorage):
             ]
             return "selector_id" in column_names
 
+    @cached_property
     def has_backfill_id_column(self) -> bool:
         with self.connect() as conn:
             column_names = [x.get("name") for x in db.inspect(conn).get_columns(RunsTable.name)]
             return "backfill_id" in column_names
 
+    @cached_property
     def has_bulk_action_job_name_column(self) -> bool:
         with self.connect() as conn:
             column_names = [
@@ -812,6 +817,7 @@ class SqlRunStorage(RunStorage):
             ]
             return "job_name" in column_names
 
+    @cached_property
     def has_backfill_tags_table(self) -> bool:
         with self.connect() as conn:
             return BackfillTagsTable.name in db.inspect(conn).get_table_names()
@@ -1047,16 +1053,17 @@ class SqlRunStorage(RunStorage):
             body=serialize_value(cast("NamedTuple", partition_backfill)),
         )
 
-        if self.has_bulk_actions_selector_cols():
+        if self.has_bulk_actions_selector_cols:
             values["selector_id"] = partition_backfill.selector_id
             values["action_type"] = partition_backfill.bulk_action_type.value
 
-        if self.has_bulk_action_job_name_column():
+        if self.has_bulk_action_job_name_column:
             values["job_name"] = partition_backfill.job_name
 
+        has_backfill_tags_table = self.has_backfill_tags_table
         with self.connect() as conn:
             conn.execute(BulkActionsTable.insert().values(**values))
-            if self.has_backfill_tags_table():
+            if has_backfill_tags_table:
                 tags_to_insert = partition_backfill.tags
                 if len(tags_to_insert.items()) > 0:
                     conn.execute(
