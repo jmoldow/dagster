@@ -139,6 +139,7 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             run_alembic_upgrade(alembic_config, conn, "index")
 
         self._initialized_dbs = set()
+        self._reset_schema_caches()
 
     @property
     def inst_data(self) -> ConfigurableClassData | None:

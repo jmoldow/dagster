@@ -146,6 +146,7 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         alembic_config = pg_alembic_config(__file__)
         with self._connect() as conn:
             run_alembic_upgrade(alembic_config, conn)
+        self._reset_schema_caches()
 
     @property
     def inst_data(self) -> ConfigurableClassData | None:

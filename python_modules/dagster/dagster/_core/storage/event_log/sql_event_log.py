@@ -194,11 +194,40 @@ class SqlEventLogStorage(EventLogStorage):
         """This method checks if a table exists in the database."""
 
     def _has_table_cached(self, table_name: str) -> bool:
+        """Check whether a table exists, caching only positive results.
+
+        Negative results (table absent) are not cached because a table that is missing before
+        ``upgrade()`` may exist afterward. Caching only ``True`` keeps the cache monotonically
+        correct without requiring explicit invalidation on every upgrade path.
+        """
         if table_name in self._has_table_cache:
-            return self._has_table_cache[table_name]
+            return True
         has_table = self.has_table(table_name)
-        self._has_table_cache[table_name] = has_table
+        if has_table:
+            self._has_table_cache[table_name] = True
         return has_table
+
+    def _reset_schema_caches(self) -> None:
+        """Invalidate all schema-existence caches after a schema migration (e.g. ``upgrade()``).
+
+        Called by concrete ``upgrade()`` implementations so that column/table checks performed
+        before the migration don't persist as stale ``False`` values afterward.
+        """
+        # Clear the hand-rolled table-existence cache.
+        self._has_table_cache.clear()
+        # Clear @cached_method results (stored under _cached_method_cache__internal__).
+        # See dagster._utils.cached_method.CACHED_METHOD_CACHE_FIELD for the field name.
+        cached_method_cache = getattr(self, "_cached_method_cache__internal__", None)
+        if cached_method_cache is not None:
+            cached_method_cache.clear()
+        # Clear @cached_property results stored in instance __dict__.
+        for attr in (
+            "has_asset_key_index_cols",
+            "supports_global_concurrency_limits",
+            "has_default_pool_limit_col",
+            "has_concurrency_limits_table",
+        ):
+            self.__dict__.pop(attr, None)
 
     def prepare_insert_event(self, event: EventLogEntry) -> Any:
         """Helper method for preparing the event log SQL insertion statement.  Abstracted away to

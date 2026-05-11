@@ -26,6 +26,7 @@ class InMemoryEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
     def __init__(self, inst_data: ConfigurableClassData | None = None, preload=None):
         self._inst_data = inst_data
+        self._has_table_cache: dict[str, bool] = {}
         self._engine = create_engine(
             create_in_memory_conn_string(f"events-{uuid.uuid4()}"),
             poolclass=NullPool,
