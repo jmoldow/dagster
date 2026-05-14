@@ -566,6 +566,7 @@ CREATE TABLE `run_tags` (
 
 LOCK TABLES `run_tags` WRITE;
 /*!40000 ALTER TABLE `run_tags` DISABLE KEYS */;
+INSERT INTO `run_tags` VALUES (1,'abcd-1234','foo','bar');
 /*!40000 ALTER TABLE `run_tags` ENABLE KEYS */;
 UNLOCK TABLES;
 
