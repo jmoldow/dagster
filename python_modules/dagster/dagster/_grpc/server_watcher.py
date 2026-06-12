@@ -13,10 +13,10 @@ MAX_RECONNECT_ATTEMPTS = 10
 def watch_grpc_server_thread(
     location_name: str,
     client: DagsterGrpcClient,
-    on_disconnect: Callable[[str], None],
-    on_reconnected: Callable[[str], None],
+    on_disconnect: Callable[[str, str], None],
+    on_reconnected: Callable[[str, str], None],
     on_updated: Callable[[str, str], None],
-    on_error: Callable[[str], None],
+    on_error: Callable[[str, str | None], None],
     needs_location_refresh: Callable[[str, str], bool],
     shutdown_event: threading.Event,
     watch_interval: float | None = None,
@@ -74,13 +74,14 @@ def watch_grpc_server_thread(
     )
 
     needs_location_refresh_count = 0
-    server_id = {"current": None, "error": False}
+    server_id_current: str | None = None
+    server_id_error: bool = False
 
     def current_server_id() -> str | None:
-        return server_id["current"]
+        return server_id_current
 
     def has_error() -> bool:
-        return server_id["error"]
+        return server_id_error
 
     def _needs_location_refresh() -> bool:
         current_id = current_server_id()
@@ -91,17 +92,18 @@ def watch_grpc_server_thread(
         return result
 
     def set_server_id(new_id: str) -> None:
-        server_id["current"] = new_id
-        server_id["error"] = False
-        nonlocal needs_location_refresh_count
+        nonlocal server_id_current, server_id_error, needs_location_refresh_count
+        server_id_current = new_id
+        server_id_error = False
         needs_location_refresh_count = 0
 
     def set_error() -> None:
         # Clearing current server ID ensures that post-error recovery always takes
         # the on_updated path in reconnect_loop, which is needed to trigger a
         # refresh that clears the error state in subscribers.
-        server_id["current"] = None
-        server_id["error"] = True
+        nonlocal server_id_current, server_id_error
+        server_id_current = None
+        server_id_error = True
 
     def watch_for_changes():
         nonlocal needs_location_refresh_count
@@ -121,17 +123,17 @@ def watch_grpc_server_thread(
             elif _needs_location_refresh():
                 # Wait 2 cycles to confirm the error persists (giving get_server_id() a
                 # chance to throw DagsterUserCodeUnreachableError and trigger reconnect_loop
-                # instead). After that, retry every 10 cycles to avoid log spam and
+                # instead). After that, retry every max_reconnect_attempts cycles to avoid log spam and
                 # unnecessary gRPC calls when the location is permanently stuck.
                 if (
                     needs_location_refresh_count >= 2
-                    and (needs_location_refresh_count - 2) % 10 == 0
+                    and (needs_location_refresh_count - 2) % max_reconnect_attempts == 0
                 ):
                     # get_server_id() keeps succeeding but _needs_location_refresh() still
                     # returns True. The workspace entry is errored/stale. Fire disconnect +
                     # reconnect callbacks to trigger a recovery refresh.
-                    on_disconnect(location_name)
-                    on_reconnected(location_name)
+                    on_disconnect(location_name, curr)
+                    on_reconnected(location_name, curr)
 
             shutdown_event.wait(watch_interval)
 
@@ -147,7 +149,7 @@ def watch_grpc_server_thread(
                 if current_server_id() == new_server_id and not has_error():
                     # Intermittent failure, was able to reconnect to the same server
                     # before max_reconnect_attempts was exhausted.
-                    on_reconnected(location_name)
+                    on_reconnected(location_name, new_server_id)
                     return
                 else:
                     # Either the server ID changed, or we're recovering after on_error
@@ -159,7 +161,7 @@ def watch_grpc_server_thread(
                 attempts += 1
 
             if attempts >= max_reconnect_attempts and not has_error():
-                on_error(location_name)
+                on_error(location_name, current_server_id())
                 set_error()
                 # Intentionally does not return — the loop continues so that if the
                 # server eventually comes back, it will be detected via on_updated.
@@ -170,17 +172,18 @@ def watch_grpc_server_thread(
         try:
             watch_for_changes()
         except DagsterUserCodeUnreachableError:
-            on_disconnect(location_name)
+            if curr := current_server_id():
+                on_disconnect(location_name, curr)
             reconnect_loop()
 
 
 def create_grpc_watch_thread(
     location_name: str,
     client: DagsterGrpcClient,
-    on_disconnect: Callable[[str], None],
-    on_reconnected: Callable[[str], None],
+    on_disconnect: Callable[[str, str], None],
+    on_reconnected: Callable[[str, str], None],
     on_updated: Callable[[str, str], None],
-    on_error: Callable[[str], None],
+    on_error: Callable[[str, str | None], None],
     needs_location_refresh: Callable[[str, str], bool],
     watch_interval: float | None = None,
     max_reconnect_attempts: int | None = None,
@@ -196,8 +199,7 @@ def create_grpc_watch_thread(
 
     shutdown_event = threading.Event()
     thread = threading.Thread(
-        target=watch_grpc_server_thread,
-        args=[
+        target=lambda: watch_grpc_server_thread(
             location_name,
             client,
             on_disconnect,
@@ -208,7 +210,7 @@ def create_grpc_watch_thread(
             shutdown_event,
             watch_interval,
             max_reconnect_attempts,
-        ],
+        ),
         name="grpc-server-watch",
         daemon=True,
     )

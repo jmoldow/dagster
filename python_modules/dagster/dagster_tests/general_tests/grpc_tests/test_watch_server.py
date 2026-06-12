@@ -30,12 +30,13 @@ _no_recovery_needed: Callable[[str, str], bool] = lambda *a: False
 def _create_watch_thread(
     location_name: str,
     client: DagsterGrpcClient,
-    on_disconnect: Callable[[str], None] = _noop,
-    on_reconnected: Callable[[str], None] = _noop,
+    on_disconnect: Callable[[str, str], None] = _noop,
+    on_reconnected: Callable[[str, str], None] = _noop,
     on_updated: Callable[[str, str], None] = _noop,
-    on_error: Callable[[str], None] = _noop,
+    on_error: Callable[[str, str | None], None] = _noop,
     needs_location_refresh: Callable[[str, str], bool] = _no_recovery_needed,
-    **kwargs: object,
+    watch_interval: float | None = None,
+    max_reconnect_attempts: int | None = None,
 ) -> tuple[threading.Event, threading.Thread]:
     """Test helper that provides noop defaults for all callbacks."""
     return create_grpc_watch_thread(
@@ -46,7 +47,8 @@ def _create_watch_thread(
         on_updated=on_updated,
         on_error=on_error,
         needs_location_refresh=needs_location_refresh,
-        **kwargs,
+        watch_interval=watch_interval,
+        max_reconnect_attempts=max_reconnect_attempts,
     )
 
 
@@ -138,12 +140,14 @@ def test_grpc_watch_thread_server_reconnect(process_cleanup, instance):
 
     called = {}
 
-    def on_disconnect(location_name):
+    def on_disconnect(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
         called["on_disconnect"] = True
 
-    def on_reconnected(location_name):
+    def on_reconnected(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
         called["on_reconnected"] = True
 
     def should_not_be_called(*args, **kwargs):
@@ -198,17 +202,20 @@ def test_grpc_watch_thread_server_error(process_cleanup, instance):
 
     called = {}
 
-    def on_disconnect(location_name):
+    def on_disconnect(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
         called["on_disconnect"] = True
 
-    def on_error(location_name):
+    def on_error(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
 
         called["on_error"] = True
 
     def on_updated(location_name, new_server_id):
         assert location_name == "test_location"
+        assert new_server_id == fixed_server_id
         called["on_updated"] = new_server_id
 
     def should_not_be_called(*args, **kwargs):
@@ -277,11 +284,11 @@ def test_run_grpc_watch_without_server():
 
     called = {}
 
-    def on_disconnect(location_name):
+    def on_disconnect(location_name, _):
         assert location_name == "test_location"
         called["on_disconnect"] = True
 
-    def on_error(location_name):
+    def on_error(location_name, _):
         assert location_name == "test_location"
         called["on_error"] = True
 
@@ -331,20 +338,24 @@ def test_grpc_watch_thread_recovery_when_errored(process_cleanup, instance):
         "simulate_error": False,
     }
 
-    def on_disconnect(location_name):
+    def on_disconnect(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
         called["on_disconnect_count"] += 1
 
-    def on_reconnected(location_name):
+    def on_reconnected(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
         called["on_reconnected_count"] += 1
 
     def on_updated(location_name, new_server_id):
         assert location_name == "test_location"
+        assert new_server_id == fixed_server_id
         called["on_updated_count"] += 1
 
-    def on_error(location_name):
+    def on_error(location_name, server_id):
         assert location_name == "test_location"
+        assert server_id == fixed_server_id
         called["on_error_count"] += 1
 
     def has_error(location_name, version_key):

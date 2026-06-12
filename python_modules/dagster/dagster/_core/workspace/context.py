@@ -1060,7 +1060,7 @@ class WorkspaceProcessContext(IWorkspaceProcessContext[WorkspaceRequestContext])
                     server_id=new_server_id,
                 )
             ),
-            on_error=lambda location_name: self._send_state_event_to_subscribers(
+            on_error=lambda location_name, server_id: self._send_state_event_to_subscribers(
                 LocationStateChangeEvent(
                     LocationStateChangeEventType.LOCATION_ERROR,
                     location_name=location_name,
@@ -1068,20 +1068,23 @@ class WorkspaceProcessContext(IWorkspaceProcessContext[WorkspaceRequestContext])
                         "Unable to reconnect to server. You can reload the server once it is "
                         "reachable again"
                     ),
+                    server_id=server_id,
                 )
             ),
-            on_disconnect=lambda location_name: self._send_state_event_to_subscribers(
+            on_disconnect=lambda location_name, server_id: self._send_state_event_to_subscribers(
                 LocationStateChangeEvent(
                     LocationStateChangeEventType.LOCATION_DISCONNECTED,
                     location_name=location_name,
                     message="Disconnected from the server.",
+                    server_id=server_id,
                 )
             ),
-            on_reconnected=lambda location_name: self._send_state_event_to_subscribers(
+            on_reconnected=lambda location_name, server_id: self._send_state_event_to_subscribers(
                 LocationStateChangeEvent(
                     LocationStateChangeEventType.LOCATION_RECONNECTED,
                     location_name=location_name,
                     message="Reconnected to the server.",
+                    server_id=server_id,
                 )
             ),
             needs_location_refresh=self._should_recover_location,
