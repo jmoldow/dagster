@@ -9,6 +9,21 @@ WATCH_INTERVAL = 1
 REQUEST_TIMEOUT = 2
 MAX_RECONNECT_ATTEMPTS = 10
 
+ 122 │      -                # Wait 2 cycles to confirm the error persists (giving get_server_id() a
+ 123 │      -                # chance to throw DagsterUserCodeUnreachableError and trigger reconnect_loop
+ 124 │      -                # instead).
+
+
+# After an initial Number of consecutive poll cycles to run before confirming the error persists and firing recovery callbacks.
+# Waiting this many cycles gives get_server_id() a chance to throw and route us through
+# reconnect_loop instead — the preferred recovery path for true server disconnects.
+RECOVERY_CONFIRM_CYCLES = 2
+
+# Once the location is confirmed stuck, retry recovery every N additional poll cycles.
+# Spacing out retries avoids log spam and unnecessary gRPC calls when a location is
+# permanently stuck.
+RECOVERY_RETRY_INTERVAL_CYCLES = 10
+
 
 def watch_grpc_server_thread(
     location_name: str,
@@ -97,9 +112,7 @@ def watch_grpc_server_thread(
         needs_location_refresh_count = 0
 
     def set_error() -> None:
-        # Clearing current server ID ensures that post-error recovery always takes
-        # the on_updated path in reconnect_loop, which is needed to trigger a
-        # refresh that clears the error state in subscribers.
+        # Clearing current server ID forces the on_updated branch on recovery; see docstring.
         server_id["current"] = None
         server_id["error"] = True
 
@@ -119,17 +132,15 @@ def watch_grpc_server_thread(
                 set_server_id(new_server_id)
                 on_updated(location_name, new_server_id)
             elif _needs_location_refresh():
-                # Wait 2 cycles to confirm the error persists (giving get_server_id() a
-                # chance to throw DagsterUserCodeUnreachableError and trigger reconnect_loop
-                # instead). After that, retry every 10 cycles to avoid log spam and
-                # unnecessary gRPC calls when the location is permanently stuck.
+                # get_server_id() keeps succeeding but the workspace entry is errored/stale.
+                # Fire disconnect + reconnect callbacks to trigger a recovery refresh, on the
+                # confirm-then-retry cadence defined by the RECOVERY_* constants above.
                 if (
-                    needs_location_refresh_count >= 2
-                    and (needs_location_refresh_count - 2) % 10 == 0
+                    needs_location_refresh_count >= RECOVERY_CONFIRM_CYCLES
+                    and (needs_location_refresh_count - RECOVERY_CONFIRM_CYCLES)
+                    % RECOVERY_RETRY_INTERVAL_CYCLES
+                    == 0
                 ):
-                    # get_server_id() keeps succeeding but _needs_location_refresh() still
-                    # returns True. The workspace entry is errored/stale. Fire disconnect +
-                    # reconnect callbacks to trigger a recovery refresh.
                     on_disconnect(location_name)
                     on_reconnected(location_name)
 

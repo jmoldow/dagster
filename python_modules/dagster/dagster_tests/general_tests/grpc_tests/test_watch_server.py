@@ -23,7 +23,7 @@ def wait_for_condition(
         time.sleep(interval)
 
 
-_noop: Callable = lambda *a: None
+_noop: Callable[..., None] = lambda *a: None
 _no_recovery_needed: Callable[[str, str], bool] = lambda *a: False
 
 

@@ -2,6 +2,7 @@ import time
 from typing import Any
 
 from dagster._core.remote_representation.grpc_server_state_subscriber import (
+    LocationStateChangeEvent,
     LocationStateChangeEventType,
     LocationStateSubscriber,
 )
@@ -41,16 +42,12 @@ class TestSubscribeToGrpcServerEvents(BaseTestSuite):
                 raise Exception("Timed out waiting for LOCATION_ERROR event")
             time.sleep(1)
 
-        error_events = [
-            e for e in events if e.event_type == LocationStateChangeEventType.LOCATION_ERROR
-        ]
+        error_events = _events_of_type(events, LocationStateChangeEventType.LOCATION_ERROR)
         assert len(error_events) == 1
         assert error_events[0].location_name == location.name
 
         # LOCATION_DISCONNECTED should have arrived before LOCATION_ERROR
-        disconnect_events = [
-            e for e in events if e.event_type == LocationStateChangeEventType.LOCATION_DISCONNECTED
-        ]
+        disconnect_events = _events_of_type(events, LocationStateChangeEventType.LOCATION_DISCONNECTED)
         assert len(disconnect_events) == 1
         assert disconnect_events[0].location_name == location.name
 
@@ -92,7 +89,7 @@ class TestGrpcServerRecovery(RecoveryTestSuite):
             load_error=SerializableErrorInfo("Simulated failure", [], "RuntimeError"),
             load_status=CodeLocationLoadStatus.LOADED,
             display_metadata=current_entry.origin.get_display_metadata(),
-            update_timestamp=0.0,
+            update_timestamp=time.time(),
             version_key="stale-version-key",
             definitions_source=DefinitionsSource.CODE_SERVER,
         )
@@ -124,11 +121,13 @@ class TestGrpcServerRecovery(RecoveryTestSuite):
         assert ctx.has_code_location(location_name)
 
         # Verify the recovery events were fired
-        disconnect_events = [
-            e for e in events if e.event_type == LocationStateChangeEventType.LOCATION_DISCONNECTED
-        ]
-        reconnected_events = [
-            e for e in events if e.event_type == LocationStateChangeEventType.LOCATION_RECONNECTED
-        ]
+        disconnect_events = _events_of_type(events, LocationStateChangeEventType.LOCATION_DISCONNECTED)
+        reconnected_events = _events_of_type(events, LocationStateChangeEventType.LOCATION_RECONNECTED)
         assert len(disconnect_events) >= 1
         assert len(reconnected_events) >= 1
+
+
+def _events_of_type(
+    events: list[LocationStateChangeEvent], event_type: LocationStateChangeEventType
+) -> list[LocationStateChangeEvent]:
+    return [e for e in events if e.event_type == event_type]
