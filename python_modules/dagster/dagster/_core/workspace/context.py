@@ -1084,7 +1084,7 @@ class WorkspaceProcessContext(IWorkspaceProcessContext[WorkspaceRequestContext])
                     message="Reconnected to the server.",
                 )
             ),
-            needs_location_refresh=self._should_recover_location,
+            get_code_location_error=self._get_current_code_location_error,
         )
         self._watch_thread_shutdown_events[location_name] = shutdown_event
         self._watch_threads[location_name] = watch_thread
@@ -1181,21 +1181,36 @@ class WorkspaceProcessContext(IWorkspaceProcessContext[WorkspaceRequestContext])
                 is not None
             )
 
-    def _should_recover_location(self, location_name: str, version_key: str) -> bool:
-        """Check without locking whether a code location needs a recovery refresh.
+    def _get_current_code_location_error(self, location_name: str) -> SerializableErrorInfo | None:
+        """Check without locking whether a location has an error.
 
-        Returns True if the location is in an error state or has a stale version key.
         Called from the watch thread without holding self._lock. This is safe because
         _current_workspace is replaced atomically (single reference assignment) and we only
         need a consistent-enough snapshot — correctness doesn't depend on reading the latest
         value.
         """
         check.str_param(location_name, "location_name")
-        check.str_param(version_key, "version_key")
+        entry = self._current_workspace.code_location_entries.get(location_name, None)
+        return entry.load_error if entry is not None else None
+
+    def _should_recover_location(self, location_name: str) -> bool:
+        """Check without locking whether a location should refresh to recover from a transient error.
+
+        Returns True if the location is in a transient, recoverable error state.
+
+        Called from the watch thread without holding self._lock. This is safe because
+        _current_workspace is replaced atomically (single reference assignment) and we only
+        need a consistent-enough snapshot — correctness doesn't depend on reading the latest
+        value.
+        """
+        check.str_param(location_name, "location_name")
         entry = self._current_workspace.code_location_entries.get(location_name, None)
         if entry is None:
             return False
-        return entry.load_error is not None or entry.version_key != version_key
+        return (
+            entry.load_error is not None
+            and entry.load_error.cls_name == "DagsterUserCodeUnreachableError"
+        )
 
     def reload_code_location(self, name: str) -> None:
         new_entry = self._load_location(

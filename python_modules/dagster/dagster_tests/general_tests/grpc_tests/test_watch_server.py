@@ -24,7 +24,7 @@ def wait_for_condition(
 
 
 _noop: Callable = lambda *a: None
-_no_recovery_needed: Callable[[str, str], bool] = lambda *a: False
+_no_recovery_needed: Callable[[str], bool] = lambda *a: False
 
 
 def _create_watch_thread(
@@ -34,8 +34,9 @@ def _create_watch_thread(
     on_reconnected: Callable[[str], None] = _noop,
     on_updated: Callable[[str, str], None] = _noop,
     on_error: Callable[[str], None] = _noop,
-    needs_location_refresh: Callable[[str, str], bool] = _no_recovery_needed,
-    **kwargs: object,
+    needs_location_refresh: Callable[[str], bool] = _no_recovery_needed,
+    watch_interval: float | None = None,
+    max_reconnect_attempts: int | None = None,
 ) -> tuple[threading.Event, threading.Thread]:
     """Test helper that provides noop defaults for all callbacks."""
     return create_grpc_watch_thread(
@@ -46,7 +47,8 @@ def _create_watch_thread(
         on_updated=on_updated,
         on_error=on_error,
         needs_location_refresh=needs_location_refresh,
-        **kwargs,
+        watch_interval=watch_interval,
+        max_reconnect_attempts=max_reconnect_attempts,
     )
 
 
@@ -347,7 +349,7 @@ def test_grpc_watch_thread_recovery_when_errored(process_cleanup, instance):
         assert location_name == "test_location"
         called["on_error_count"] += 1
 
-    def has_error(location_name, version_key):
+    def has_error(location_name):
         return called["simulate_error"]
 
     # Create server
