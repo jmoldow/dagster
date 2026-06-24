@@ -204,6 +204,12 @@ def test_asset_lazy_migration():
             assert not storage.has_asset_key_index_cols()  # ty: ignore[unresolved-attribute]
             assert not storage.has_secondary_index(ASSET_KEY_INDEX_COLS)  # ty: ignore[unresolved-attribute]
 
+        # Methods below may be cached, so we need to construct a new storage object so that the
+        # pre-migration values aren't retained. In a real Dagster system, all Dagster components
+        # would need to be restarted after a migration.
+        with DagsterInstance.from_ref(InstanceRef.from_dir(test_dir)) as instance:
+            storage = instance.event_log_storage
+
             # run the schema migration without reindexing the asset keys
             storage.upgrade()
             assert storage.has_asset_key_index_cols()  # ty: ignore[unresolved-attribute]
