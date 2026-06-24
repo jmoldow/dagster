@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
+from functools import cache
 from typing import Any
 
 import sqlalchemy as db
@@ -64,7 +65,8 @@ class InMemoryEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self):
         return self._connect()
 
-    def has_table(self, table_name: str) -> bool:
+    @cache
+    def has_table(self, table_name: str) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         with self._engine.connect() as conn:
             return bool(self._engine.dialect.has_table(conn, table_name))
 

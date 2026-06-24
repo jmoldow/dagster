@@ -3,7 +3,7 @@ import os
 from collections import defaultdict
 from collections.abc import Mapping
 from contextlib import contextmanager
-from functools import cached_property
+from functools import cache, cached_property
 from typing import Any
 
 import sqlalchemy as db
@@ -122,7 +122,8 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self):
         return self._connect()
 
-    def has_table(self, table_name: str) -> bool:
+    @cache
+    def has_table(self, table_name: str) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         engine = create_engine(
             self._conn_string,
             poolclass=NullPool,

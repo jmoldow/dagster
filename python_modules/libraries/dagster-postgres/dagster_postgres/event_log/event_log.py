@@ -1,5 +1,6 @@
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from functools import cache
 from typing import TYPE_CHECKING, Any, ContextManager, cast  # noqa: UP035
 
 import dagster._check as check
@@ -354,8 +355,10 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
                 with conn.begin():
                     yield conn
 
-    def has_table(self, table_name: str) -> bool:
-        return bool(self._engine.dialect.has_table(self._engine.connect(), table_name))
+    @cache
+    def has_table(self, table_name: str) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
+        with self._connect() as conn:
+            return bool(self._engine.dialect.has_table(conn, table_name))
 
     def has_secondary_index(self, name: str) -> bool:
         if name not in self._secondary_index_cache:

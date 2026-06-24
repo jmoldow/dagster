@@ -1,3 +1,4 @@
+from functools import cache
 from typing import ContextManager, cast  # noqa: UP035
 
 import dagster._check as check
@@ -186,7 +187,8 @@ class MySQLEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self) -> ContextManager[Connection]:
         return self._connect()
 
-    def has_table(self, table_name: str) -> bool:
+    @cache
+    def has_table(self, table_name: str) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         with self._connect() as conn:
             return table_name in db.inspect(conn).get_table_names()
 

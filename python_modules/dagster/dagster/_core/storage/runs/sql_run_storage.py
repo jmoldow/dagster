@@ -792,6 +792,7 @@ class SqlRunStorage(RunStorage):
     def optimize(self, print_fn: PrintFn | None = None, force_rebuild_all: bool = False) -> None:
         self._execute_data_migrations(OPTIONAL_DATA_MIGRATIONS, print_fn, force_rebuild_all)
 
+    @cache
     def has_built_index(self, migration_name: str) -> bool:
         query = (
             db_select([1])
@@ -1089,9 +1090,10 @@ class SqlRunStorage(RunStorage):
         if self.has_bulk_action_job_name_column():
             values["job_name"] = partition_backfill.job_name
 
+        has_backfill_tags_table = self.has_backfill_tags_table()
         with self.connect() as conn:
             conn.execute(BulkActionsTable.insert().values(**values))
-            if self.has_backfill_tags_table():
+            if has_backfill_tags_table:
                 tags_to_insert = partition_backfill.tags
                 if len(tags_to_insert.items()) > 0:
                     conn.execute(

@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from functools import cached_property
+from functools import cache, cached_property
 from typing import TYPE_CHECKING, Any, ContextManager  # noqa: UP035
 
 import dagster_shared.seven as seven
@@ -161,7 +161,8 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             if os.path.splitext(os.path.basename(filename))[0] != INDEX_SHARD_NAME
         ]
 
-    def has_table(self, table_name: str) -> bool:
+    @cache
+    def has_table(self, table_name: str) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         conn_string = self.conn_string_for_shard(INDEX_SHARD_NAME)
         engine = create_engine(
             conn_string,
