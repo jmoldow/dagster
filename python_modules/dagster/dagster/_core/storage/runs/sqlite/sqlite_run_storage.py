@@ -123,6 +123,7 @@ class SqliteRunStorage(SqlRunStorage, ConfigurableClass):
         if should_mark_indexes:
             run_storage.migrate()
             run_storage.optimize()
+            run_storage = cls(conn_string, inst_data)
 
         return run_storage
 

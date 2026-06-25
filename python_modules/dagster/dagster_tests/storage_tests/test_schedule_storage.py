@@ -37,24 +37,20 @@ class TestSqliteScheduleStorage(TestScheduleStorage):
         with request.param() as s:
             yield s
 
-    def test_bucket_gating(self, storage):
+    @pytest.mark.parametrize(
+        "sqlite_version,supports_batch_queries",
+        [
+            ("3.7.17", False),
+            ("3.25.1", True),
+            ("3.25.19", True),
+        ],
+    )
+    def test_bucket_gating(self, storage, sqlite_version, supports_batch_queries):
         with mock.patch(
             "dagster._core.storage.schedules.sqlite.sqlite_schedule_storage.get_sqlite_version",
-            return_value="3.7.17",
+            return_value=sqlite_version,
         ):
-            assert not storage.supports_batch_queries
-
-        with mock.patch(
-            "dagster._core.storage.schedules.sqlite.sqlite_schedule_storage.get_sqlite_version",
-            return_value="3.25.1",
-        ):
-            assert storage.supports_batch_queries
-
-        with mock.patch(
-            "dagster._core.storage.schedules.sqlite.sqlite_schedule_storage.get_sqlite_version",
-            return_value="3.25.19",
-        ):
-            assert storage.supports_batch_queries
+            assert storage.supports_batch_queries is supports_batch_queries
 
 
 class TestLegacyStorage(TestScheduleStorage):
