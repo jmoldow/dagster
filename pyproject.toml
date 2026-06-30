@@ -1,163 +1,4 @@
 # ########################
-# ##### TY (Type Checker)
-# ########################
-
-# [Docs root]
-#   https://docs.astral.sh/ty/
-# [Configuration reference]
-#   https://docs.astral.sh/ty/configuration/
-
-# Note: Most ty configuration is handled dynamically by scripts/run-ty.py,
-# which passes CLI arguments for include/exclude paths and Python environment.
-# This section provides defaults for direct ty invocations.
-
-[tool.ty.environment]
-# Minimum version of Python on which code must run.
-python-version = "3.10"
-
-# Extra paths to use as module-resolution sources
-extra-paths = [
-  ".buildkite/buildkite-shared"
-]
-
-[tool.ty.rules]
-# ty is configured as a "strict mode" tool for selective use on specific files/packages.
-# It reports 10-100x more diagnostics than pyright because:
-#   1. pyright's `useLibraryCodeForTypes = false` treats untyped code as Any
-#   2. ty performs comprehensive type inference even on untyped dependencies
-#
-deprecated = "ignore"  # Deprecation warnings across dependencies
-possibly-missing-attribute = "ignore"  # High false positive rate
-possibly-missing-import = "ignore"  # Often incorrect in complex imports
-
-[tool.ty.src]
-
-include = [
-  # This doesn't exist but we need something here to prevent ty from
-  # complaining about an empty include list. Remove with first package added
-  # here.
-  "__placeholder__"
-]
-
-exclude = [
-  # Example notebook intentionally references undefined names as placeholders.
-  "python_modules/libraries/dagstermill/dagstermill/examples/notebooks/yield_something.ipynb",
-  # Deliberately-malformed scaffold used as a fixture for notebook-creation tests.
-  "python_modules/libraries/dagstermill/dagstermill_tests/notebooks/cli_test_scaffold.ipynb",
-  # Documentation example trees contain illustrative snippets that reference
-  # community / scaffolded packages not installed in this env; type-checking
-  # them generates spurious unresolved-import diagnostics.
-  "examples/docs_snippets",
-  "examples/docs_projects",
-  # Vendored third-party code (croniter, dateutil). Mirrors pyright's
-  # `**/_vendored` exclude in `[tool.pyright].exclude`.
-  "python_modules/dagster/dagster/_vendored",
-]
-
-# Ignore all files that are git-ignored unless explicitly included.
-respect-ignore-files = true
-
-# Override for dagster_graphql/schema: graphene's ObjectType / Mutation /
-# InputObjectType / Interface metaclass synthesizes `__init__` kwargs from
-# class-body field declarations, so e.g. `GrapheneFooType(message=..., path=...)`
-# is valid at runtime even though ty can't see `message` or `path` as accepted
-# kwargs. graphene doesn't ship `@dataclass_transform`-decorated bases, so ty
-# reports every such kwarg as `unknown-argument`. Additionally, ty 0.0.35 doesn't
-# narrow pydantic discriminated unions through `match result.typename__: case 'X':`,
-# causing unresolved-attribute, invalid-argument-type, and not-subscriptable
-# errors across the schema files. Disable all four rules for the schema subtree.
-[[tool.ty.overrides]]
-include = ["python_modules/dagster-graphql/dagster_graphql/schema/**"]
-
-[tool.ty.overrides.rules]
-# graphene's ObjectType / Mutation / etc. metaclass synthesizes __init__
-# from class-body fields. ty doesn't see it and flags every kwarg.
-unknown-argument = "ignore"
-# All three below are caused by ty 0.0.35 not narrowing pydantic
-# discriminated unions through `match result.typename__: case "X":`,
-# which is the dominant pattern in schema files. Revisit when ty
-# adds discriminated-union narrowing.
-unresolved-attribute = "ignore"
-invalid-argument-type = "ignore"
-not-subscriptable = "ignore"
-
-# ########################
-# ##### PYRIGHT
-# ########################
-
-
-# [Docs root]
-#   https://github.com/microsoft/pyright/tree/main/docs
-# [Config option reference]
-#   https://github.com/microsoft/pyright/blob/main/docs/configuration.md
-
-# Pyright does not have a docs site, but the documentation (a collection of
-# markdown files in the GH repo, linked above) is pretty thorough.
-
-[tool.pyright]
-
-typeCheckingMode = "standard"
-
-include = [
-  "docs/sphinx/_ext/dagster-sphinx",
-  "python_modules",
-  "examples",
-  "integration_tests",
-  "scripts",
-]
-
-# Unfortunately pyright does not offer a way to extend the default exclusions, so we have to
-# reiterate them here if we want to add anything else.
-exclude = [
-  "**/node_modules",
-  "**/__pycache__",
-  "**/__generated__",
-  "**/vendor",
-  "**/_vendored",
-  "**/.tox",
-  ".git",
-  "**/.venv*",
-  "**/build",
-]
-
-extraPaths = [
-  ".buildkite/buildkite-shared"
-]
-
-# These two settings point pyright to a python environment to resolve imports against. This virtual
-# environment is defined in the `pyright` tox environment in the tox section below-- that
-# environment must be built before pyright can run correctly.
-venv = ".venv"
-venvPath = "pyright/master"
-
-# Minimum version of Python on which code must run. This determines the standard library stubs used by
-# pyright.
-pythonVersion = "3.10"
-
-# Disable reading type annotations from libraries that are not explicitly marked as typed (i.e. that
-# include a py.typed file). All imports from these libraries are given the `Unknown` type (i.e.
-# `Any`). This setting does not affect `py.typed` libraries.
-useLibraryCodeForTypes = false
-
-# We use ruff for this.
-reportInvalidStringEscapeSequence = false
-
-# As of 2023-02-02, there are still many `py.typed` libs that are not compliant with the standards
-# for defining a public API.
-reportPrivateImportUsage = false
-
-# Since we only use pyright, there is no need to suppress type errors that pyright does not
-# recognize.
-reportUnnecessaryTypeIgnoreComment = "warning"
-
-# Skip analyzing unannotated code in examples to facilitate terse code.
-executionEnvironments = [
-  { root = "examples", analyzeUnannotatedFunctions=false },
-  { root = "python_modules" },
-  { root = "integration_tests" }
-]
-
-# ########################
 # ##### PYTEST
 # ########################
 
@@ -244,11 +85,22 @@ exclude = ["*.ipynb"]
 "**/conftest.py" = ["INP001"]
 "examples/**" = ["INP001"]
 "docs/**" = ["INP001"]
-"**/scripts/**" = ["INP001"]
+"**/scripts/**" = ["INP001", "T201"]  # scripts are CLI tools — print is the output channel
 "python_modules/dagster/dagster/_core/storage/alembic/env.py" = ["INP001"]
+"python_modules/dagster/dagster/_core/storage/alembic/versions/__init__.py" = ["INP001"]
 "python_modules/libraries/dagster-airlift/kitchen-sink/**" = ["INP001"]
 # There is an __init__.py.tmpl
 "python_modules/dagster/dagster/_generate/templates/REPO_NAME_PLACEHOLDER/REPO_NAME_PLACEHOLDER/assets.py" = ["INP001"]
+# Project-scaffold templates; the PROJECT_NAME_PLACEHOLDER is substituted at generation time.
+"**/templates/PROJECT_NAME_PLACEHOLDER/**/__init__.py" = ["INP001"]
+
+# User-facing connectivity reproduction script shown verbatim in the docs; print is the
+# intended output channel and the dagster-cloud API config is read off the instance.
+"examples/docs_snippets/docs_snippets/deployment/dagster_plus/hybrid/test_connection.py" = ["T201", "SLF001"]
+
+# yaml_utils implements the wrapped loader; test_yaml asserts the bare yaml.safe_load behavior for comparison.
+"python_modules/libraries/dagster-shared/dagster_shared/yaml_utils/__init__.py" = ["TID251"]
+"python_modules/libraries/dagster-shared/dagster_shared_tests/test_yaml.py" = ["TID251"]
 
 [tool.dagster]
 module_name = "dagster_test.toys.repo"

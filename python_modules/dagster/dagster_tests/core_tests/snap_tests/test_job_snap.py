@@ -15,6 +15,7 @@ from dagster._core.snap.dep_snapshot import (
     OutputHandleSnap,
     build_dep_structure_snapshot_from_graph_def,
 )
+from dagster._record import replace
 from dagster._serdes import serialize_pp, serialize_value
 from dagster_shared.serdes import deserialize_value
 
@@ -86,6 +87,39 @@ def test_noop_deps_snap():
     invocations = build_dep_structure_snapshot_from_graph_def(noop_job.graph).node_invocation_snaps
     assert len(invocations) == 1
     assert isinstance(invocations[0], NodeInvocationSnap)
+
+
+def test_node_invocation_snap_tags_field_backcompat():
+    # Older Dagster versions populated NodeInvocationSnap.tags from node.tags. The field
+    # must still deserialize back into `tags` so that legacy payloads preserve their data.
+    legacy_payload = (
+        '{"__class__": "SolidInvocationSnap", "input_dep_snaps": [], '
+        '"is_dynamic_mapped": false, "solid_def_name": "noop_op", '
+        '"solid_name": "noop_op", "tags": {"dagster/compute_kind": "python"}}'
+    )
+    invocation = deserialize_value(legacy_payload, NodeInvocationSnap)
+    assert invocation.tags == {"dagster/compute_kind": "python"}
+
+
+def test_job_snap_legacy_payload_roundtrip():
+    # JobSnap-level analog of test_node_invocation_snap_tags_field_backcompat: a JobSnap
+    # mimicking what an older producer emits (NodeInvocationSnap.tags populated from
+    # node.tags) must round-trip through deserialize with its tags preserved.
+    fresh = JobSnap.from_job_def(get_noop_pipeline())
+    legacy = replace(
+        fresh,
+        dep_structure_snapshot=DependencyStructureSnapshot(
+            node_invocation_snaps=[
+                inv._replace(tags={"dagster/compute_kind": "python"})
+                for inv in fresh.dep_structure_snapshot.node_invocation_snaps
+            ],
+        ),
+    )
+    deserialized = deserialize_value(serialize_value(legacy), JobSnap)
+    assert all(
+        inv.tags == {"dagster/compute_kind": "python"}
+        for inv in deserialized.dep_structure_snapshot.node_invocation_snaps
+    )
 
 
 def test_two_invocations_deps_snap(snapshot):

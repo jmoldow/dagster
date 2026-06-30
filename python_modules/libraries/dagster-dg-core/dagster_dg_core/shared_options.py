@@ -31,13 +31,13 @@ def make_option_group(
                 # This is borrowed from click itself, it is how its decorators operate on both commands
                 # and regular functions.
                 if not hasattr(fn, "__click_params__"):
-                    fn.__click_params__ = []
+                    fn.__click_params__ = []  # ty: ignore[invalid-assignment]
                 for option in options:
-                    fn.__click_params__.append(option)
+                    fn.__click_params__.append(option)  # ty: ignore[unresolved-attribute]
 
             return fn
         else:
-            return lambda fn: option_group(fn, names=names)
+            return lambda fn: option_group(fn, names=names)  # ty: ignore[invalid-return-type]
 
     return option_group
 

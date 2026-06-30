@@ -26,7 +26,6 @@
   "peerDependencies": {
     "@blueprintjs/core": "^5",
     "@blueprintjs/popover2": "^2",
-    "@blueprintjs/select": "^5",
     "@tanstack/react-virtual": "^3.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -35,6 +34,7 @@
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.11",
     "@radix-ui/react-progress": "^1.1.8",
+    "@radix-ui/react-radio-group": "^1.2.3",
     "@radix-ui/react-slider": "^1.2.2",
     "@radix-ui/react-tooltip": "^1.1.6",
     "@react-hook/resize-observer": "^1.2.6",

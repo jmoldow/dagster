@@ -604,7 +604,7 @@ def traced(func: T_Callable) -> T_Callable:
     def inner(*args, **kwargs):
         counter = traced_counter.get()
         if counter and isinstance(counter, Counter):
-            counter.increment(func.__qualname__)
+            counter.increment(func.__qualname__)  # ty: ignore[unresolved-attribute]
 
         return func(*args, **kwargs)
 
@@ -700,7 +700,7 @@ def xor(a: object, b: object) -> bool:
 
 
 def tail_file(path_or_fd: str | int, should_stop: Callable[[], bool]) -> Iterator[str]:
-    with open(path_or_fd) as output_stream:
+    with open(path_or_fd, encoding="utf-8") as output_stream:
         while True:
             line = output_stream.readline()
             if line:

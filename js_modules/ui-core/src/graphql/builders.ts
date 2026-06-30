@@ -60,7 +60,7 @@ type Scalars = {
   Int: {input: number; output: number};
   Float: {input: number; output: number};
   GenericScalar: {input: any; output: any};
-  JSONString: {input: any; output: any};
+  JsonSchema: {input: any; output: any};
   RunConfigData: {input: any; output: any};
 };
 
@@ -114,6 +114,21 @@ type AlertSuccessEvent = MessageEvent &
     stepKey: Maybe<Scalars['String']['output']>;
     timestamp: Scalars['String']['output'];
   };
+
+type AppManagedComponent = {
+  __typename: 'AppManagedComponent';
+  attributes: Scalars['String']['output'];
+  componentId: Scalars['String']['output'];
+  componentType: Scalars['String']['output'];
+};
+
+type AppManagedComponents = {
+  __typename: 'AppManagedComponents';
+  components: Array<AppManagedComponent>;
+  locationName: Scalars['String']['output'];
+};
+
+type AppManagedComponentsOrError = AppManagedComponents | PythonError;
 
 type ArrayConfigType = ConfigType &
   WrappingConfigType & {
@@ -975,6 +990,7 @@ export {BulkActionStatus};
 type BulkActionsFilter = {
   createdAfter?: InputMaybe<Scalars['Float']['input']>;
   createdBefore?: InputMaybe<Scalars['Float']['input']>;
+  selectorId?: InputMaybe<Scalars['String']['input']>;
   statuses?: InputMaybe<Array<BulkActionStatus>>;
 };
 
@@ -1015,6 +1031,33 @@ type CodeReferencesMetadataEntry = MetadataEntry & {
   description: Maybe<Scalars['String']['output']>;
   label: Scalars['String']['output'];
 };
+
+type ComponentFormSchema = {
+  __typename: 'ComponentFormSchema';
+  dataSchema: Scalars['JsonSchema']['output'];
+  uiSchema: Scalars['JsonSchema']['output'];
+};
+
+type ComponentTypeInfo = {
+  __typename: 'ComponentTypeInfo';
+  description: Maybe<Scalars['String']['output']>;
+  example: Scalars['String']['output'];
+  formSchema: Maybe<ComponentFormSchema>;
+  isAppManaged: Scalars['Boolean']['output'];
+  name: Scalars['String']['output'];
+  namespace: Scalars['String']['output'];
+  owners: Maybe<Array<Scalars['String']['output']>>;
+  schema: Maybe<Scalars['JsonSchema']['output']>;
+  tags: Maybe<Array<Scalars['String']['output']>>;
+};
+
+type ComponentTypes = {
+  __typename: 'ComponentTypes';
+  componentTypes: Array<ComponentTypeInfo>;
+  locationName: Scalars['String']['output'];
+};
+
+type ComponentTypesOrError = ComponentTypes | PythonError | RepositoryLocationNotFound;
 
 type CompositeConfigType = ConfigType & {
   __typename: 'CompositeConfigType';
@@ -1320,6 +1363,17 @@ type DefsStateInfoEntry = {
 };
 
 export {DefsStateManagementType};
+
+type DeleteAppManagedComponentResult =
+  | DeleteAppManagedComponentSuccess
+  | PythonError
+  | UnauthorizedError;
+
+type DeleteAppManagedComponentSuccess = {
+  __typename: 'DeleteAppManagedComponentSuccess';
+  componentId: Scalars['String']['output'];
+  locationName: Scalars['String']['output'];
+};
 
 type DeleteDynamicPartitionsResult =
   | DeleteDynamicPartitionsSuccess
@@ -2666,13 +2720,6 @@ type LocalFileCodeReference = {
   lineNumber: Maybe<Scalars['Int']['output']>;
 };
 
-type LocationDocsJson = {
-  __typename: 'LocationDocsJson';
-  json: Scalars['JSONString']['output'];
-};
-
-type LocationDocsJsonOrError = LocationDocsJson | PythonError;
-
 type LocationStateChangeEvent = {
   __typename: 'LocationStateChangeEvent';
   eventType: LocationStateChangeEventType;
@@ -2924,6 +2971,7 @@ type Mutation = {
   __typename: 'Mutation';
   addDynamicPartition: AddDynamicPartitionResult;
   cancelPartitionBackfill: CancelBackfillResult;
+  deleteAppManagedComponent: DeleteAppManagedComponentResult;
   deleteConcurrencyLimit: Scalars['Boolean']['output'];
   deleteDynamicPartitions: DeleteDynamicPartitionsResult;
   deletePipelineRun: DeletePipelineRunResult;
@@ -2947,6 +2995,7 @@ type Mutation = {
   resumePartitionBackfill: ResumeBackfillResult;
   scheduleDryRun: ScheduleDryRunResult;
   sensorDryRun: SensorDryRunResult;
+  setAppManagedComponent: SetAppManagedComponentResult;
   setAutoMaterializePaused: Scalars['Boolean']['output'];
   setConcurrencyLimit: Scalars['Boolean']['output'];
   setNuxSeen: Scalars['Boolean']['output'];
@@ -2970,6 +3019,11 @@ type MutationAddDynamicPartitionArgs = {
 
 type MutationCancelPartitionBackfillArgs = {
   backfillId: Scalars['String']['input'];
+};
+
+type MutationDeleteAppManagedComponentArgs = {
+  componentId: Scalars['String']['input'];
+  locationName: Scalars['String']['input'];
 };
 
 type MutationDeleteConcurrencyLimitArgs = {
@@ -3068,6 +3122,13 @@ type MutationScheduleDryRunArgs = {
 type MutationSensorDryRunArgs = {
   cursor?: InputMaybe<Scalars['String']['input']>;
   selectorData: SensorSelector;
+};
+
+type MutationSetAppManagedComponentArgs = {
+  attributes: Scalars['String']['input'];
+  componentId: Scalars['String']['input'];
+  componentType: Scalars['String']['input'];
+  locationName: Scalars['String']['input'];
 };
 
 type MutationSetAutoMaterializePausedArgs = {
@@ -4064,6 +4125,7 @@ type PythonError = Error & {
 type Query = {
   __typename: 'Query';
   allTopLevelResourceDetailsOrError: ResourceDetailsListOrError;
+  appManagedComponentsForLocationOrError: AppManagedComponentsOrError;
   assetBackfillPreview: Array<AssetPartitions>;
   assetCheckExecutions: Array<AssetCheckExecution>;
   assetConditionEvaluationForPartition: Maybe<AssetConditionEvaluation>;
@@ -4083,6 +4145,7 @@ type Query = {
   canBulkTerminate: Scalars['Boolean']['output'];
   capturedLogs: CapturedLogs;
   capturedLogsMetadata: CapturedLogsMetadata;
+  componentTypesForLocationOrError: ComponentTypesOrError;
   executionPlanOrError: ExecutionPlanOrError;
   graphOrError: GraphOrError;
   instance: Instance;
@@ -4130,6 +4193,10 @@ type Query = {
 
 type QueryAllTopLevelResourceDetailsOrErrorArgs = {
   repositorySelector: RepositorySelector;
+};
+
+type QueryAppManagedComponentsForLocationOrErrorArgs = {
+  locationName: Scalars['String']['input'];
 };
 
 type QueryAssetBackfillPreviewArgs = {
@@ -4229,6 +4296,10 @@ type QueryCapturedLogsArgs = {
 
 type QueryCapturedLogsMetadataArgs = {
   logKey: Array<Scalars['String']['input']>;
+};
+
+type QueryComponentTypesForLocationOrErrorArgs = {
+  locationName: Scalars['String']['input'];
 };
 
 type QueryExecutionPlanOrErrorArgs = {
@@ -4545,11 +4616,9 @@ type Repository = {
   assetNodes: Array<AssetNode>;
   assetNodesConnection: AssetNodeConnection;
   displayMetadata: Array<RepositoryMetadata>;
-  hasLocationDocs: Scalars['Boolean']['output'];
   id: Scalars['ID']['output'];
   jobs: Array<Job>;
   location: RepositoryLocation;
-  locationDocsJsonOrError: LocationDocsJsonOrError;
   name: Scalars['String']['output'];
   origin: RepositoryOrigin;
   partitionSets: Array<PartitionSet>;
@@ -4837,9 +4906,11 @@ type Run = PipelineRun &
     __typename: 'Run';
     allPools: Maybe<Array<Scalars['String']['output']>>;
     assetCheckSelection: Maybe<Array<AssetCheckhandle>>;
+    assetCheckSelectionCount: Scalars['Int']['output'];
     assetChecks: Maybe<Array<AssetCheckhandle>>;
     assetMaterializations: Array<MaterializationEvent>;
     assetSelection: Maybe<Array<AssetKey>>;
+    assetSelectionCount: Scalars['Int']['output'];
     assets: Array<Asset>;
     canTerminate: Scalars['Boolean']['output'];
     capturedLogs: CapturedLogs;
@@ -4879,6 +4950,14 @@ type Run = PipelineRun &
     tags: Array<PipelineTag>;
     updateTime: Maybe<Scalars['Float']['output']>;
   };
+
+type RunAssetCheckSelectionArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+};
+
+type RunAssetSelectionArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+};
 
 type RunCapturedLogsArgs = {
   fileKey: Scalars['String']['input'];
@@ -5487,6 +5566,13 @@ type Sensors = {
 };
 
 type SensorsOrError = PythonError | RepositoryNotFoundError | Sensors;
+
+type SetAppManagedComponentResult = PythonError | SetAppManagedComponentSuccess | UnauthorizedError;
+
+type SetAppManagedComponentSuccess = {
+  __typename: 'SetAppManagedComponentSuccess';
+  component: AppManagedComponent;
+};
 
 type SetSensorCursorMutation = {
   __typename: 'SetSensorCursorMutation';
@@ -6235,6 +6321,36 @@ export const buildAlertSuccessEvent = (
       overrides && overrides.hasOwnProperty('solidHandleID') ? overrides.solidHandleID! : 'at',
     stepKey: overrides && overrides.hasOwnProperty('stepKey') ? overrides.stepKey! : 'veritatis',
     timestamp: overrides && overrides.hasOwnProperty('timestamp') ? overrides.timestamp! : 'quia',
+  };
+};
+
+export const buildAppManagedComponent = (
+  overrides?: Partial<AppManagedComponent>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'AppManagedComponent'} & AppManagedComponent => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('AppManagedComponent');
+  return {
+    __typename: 'AppManagedComponent',
+    attributes: overrides && overrides.hasOwnProperty('attributes') ? overrides.attributes! : 'est',
+    componentId:
+      overrides && overrides.hasOwnProperty('componentId') ? overrides.componentId! : 'sed',
+    componentType:
+      overrides && overrides.hasOwnProperty('componentType') ? overrides.componentType! : 'illum',
+  };
+};
+
+export const buildAppManagedComponents = (
+  overrides?: Partial<AppManagedComponents>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'AppManagedComponents'} & AppManagedComponents => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('AppManagedComponents');
+  return {
+    __typename: 'AppManagedComponents',
+    components: overrides && overrides.hasOwnProperty('components') ? overrides.components! : [],
+    locationName:
+      overrides && overrides.hasOwnProperty('locationName') ? overrides.locationName! : 'doloribus',
   };
 };
 
@@ -8029,6 +8145,8 @@ export const buildBulkActionsFilter = (
       overrides && overrides.hasOwnProperty('createdAfter') ? overrides.createdAfter! : 6.09,
     createdBefore:
       overrides && overrides.hasOwnProperty('createdBefore') ? overrides.createdBefore! : 1.5,
+    selectorId:
+      overrides && overrides.hasOwnProperty('selectorId') ? overrides.selectorId! : 'numquam',
     statuses: overrides && overrides.hasOwnProperty('statuses') ? overrides.statuses! : [],
   };
 };
@@ -8114,6 +8232,63 @@ export const buildCodeReferencesMetadataEntry = (
     description:
       overrides && overrides.hasOwnProperty('description') ? overrides.description! : 'beatae',
     label: overrides && overrides.hasOwnProperty('label') ? overrides.label! : 'eveniet',
+  };
+};
+
+export const buildComponentFormSchema = (
+  overrides?: Partial<ComponentFormSchema>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'ComponentFormSchema'} & ComponentFormSchema => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('ComponentFormSchema');
+  return {
+    __typename: 'ComponentFormSchema',
+    dataSchema:
+      overrides && overrides.hasOwnProperty('dataSchema') ? overrides.dataSchema! : 'earum',
+    uiSchema: overrides && overrides.hasOwnProperty('uiSchema') ? overrides.uiSchema! : 'dolorem',
+  };
+};
+
+export const buildComponentTypeInfo = (
+  overrides?: Partial<ComponentTypeInfo>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'ComponentTypeInfo'} & ComponentTypeInfo => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('ComponentTypeInfo');
+  return {
+    __typename: 'ComponentTypeInfo',
+    description:
+      overrides && overrides.hasOwnProperty('description') ? overrides.description! : 'fuga',
+    example: overrides && overrides.hasOwnProperty('example') ? overrides.example! : 'eveniet',
+    formSchema:
+      overrides && overrides.hasOwnProperty('formSchema')
+        ? overrides.formSchema!
+        : relationshipsToOmit.has('ComponentFormSchema')
+          ? ({} as ComponentFormSchema)
+          : buildComponentFormSchema({}, relationshipsToOmit),
+    isAppManaged:
+      overrides && overrides.hasOwnProperty('isAppManaged') ? overrides.isAppManaged! : false,
+    name: overrides && overrides.hasOwnProperty('name') ? overrides.name! : 'quae',
+    namespace:
+      overrides && overrides.hasOwnProperty('namespace') ? overrides.namespace! : 'similique',
+    owners: overrides && overrides.hasOwnProperty('owners') ? overrides.owners! : [],
+    schema: overrides && overrides.hasOwnProperty('schema') ? overrides.schema! : 'illum',
+    tags: overrides && overrides.hasOwnProperty('tags') ? overrides.tags! : [],
+  };
+};
+
+export const buildComponentTypes = (
+  overrides?: Partial<ComponentTypes>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'ComponentTypes'} & ComponentTypes => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('ComponentTypes');
+  return {
+    __typename: 'ComponentTypes',
+    componentTypes:
+      overrides && overrides.hasOwnProperty('componentTypes') ? overrides.componentTypes! : [],
+    locationName:
+      overrides && overrides.hasOwnProperty('locationName') ? overrides.locationName! : 'molestiae',
   };
 };
 
@@ -8589,6 +8764,23 @@ export const buildDefsStateInfoEntry = (
           ? ({} as DefsKeyStateInfo)
           : buildDefsKeyStateInfo({}, relationshipsToOmit),
     name: overrides && overrides.hasOwnProperty('name') ? overrides.name! : 'voluptas',
+  };
+};
+
+export const buildDeleteAppManagedComponentSuccess = (
+  overrides?: Partial<DeleteAppManagedComponentSuccess>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'DeleteAppManagedComponentSuccess'} & DeleteAppManagedComponentSuccess => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('DeleteAppManagedComponentSuccess');
+  return {
+    __typename: 'DeleteAppManagedComponentSuccess',
+    componentId:
+      overrides && overrides.hasOwnProperty('componentId') ? overrides.componentId! : 'eligendi',
+    locationName:
+      overrides && overrides.hasOwnProperty('locationName')
+        ? overrides.locationName!
+        : 'architecto',
   };
 };
 
@@ -10817,18 +11009,6 @@ export const buildLocalFileCodeReference = (
   };
 };
 
-export const buildLocationDocsJson = (
-  overrides?: Partial<LocationDocsJson>,
-  _relationshipsToOmit: Set<string> = new Set(),
-): {__typename: 'LocationDocsJson'} & LocationDocsJson => {
-  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
-  relationshipsToOmit.add('LocationDocsJson');
-  return {
-    __typename: 'LocationDocsJson',
-    json: overrides && overrides.hasOwnProperty('json') ? overrides.json! : 'eos',
-  };
-};
-
 export const buildLocationStateChangeEvent = (
   overrides?: Partial<LocationStateChangeEvent>,
   _relationshipsToOmit: Set<string> = new Set(),
@@ -11394,6 +11574,12 @@ export const buildMutation = (
         : relationshipsToOmit.has('CancelBackfillSuccess')
           ? ({} as CancelBackfillSuccess)
           : buildCancelBackfillSuccess({}, relationshipsToOmit),
+    deleteAppManagedComponent:
+      overrides && overrides.hasOwnProperty('deleteAppManagedComponent')
+        ? overrides.deleteAppManagedComponent!
+        : relationshipsToOmit.has('DeleteAppManagedComponentSuccess')
+          ? ({} as DeleteAppManagedComponentSuccess)
+          : buildDeleteAppManagedComponentSuccess({}, relationshipsToOmit),
     deleteConcurrencyLimit:
       overrides && overrides.hasOwnProperty('deleteConcurrencyLimit')
         ? overrides.deleteConcurrencyLimit!
@@ -11526,6 +11712,12 @@ export const buildMutation = (
         : relationshipsToOmit.has('DryRunInstigationTick')
           ? ({} as DryRunInstigationTick)
           : buildDryRunInstigationTick({}, relationshipsToOmit),
+    setAppManagedComponent:
+      overrides && overrides.hasOwnProperty('setAppManagedComponent')
+        ? overrides.setAppManagedComponent!
+        : relationshipsToOmit.has('PythonError')
+          ? ({} as PythonError)
+          : buildPythonError({}, relationshipsToOmit),
     setAutoMaterializePaused:
       overrides && overrides.hasOwnProperty('setAutoMaterializePaused')
         ? overrides.setAutoMaterializePaused!
@@ -13325,6 +13517,12 @@ export const buildQuery = (
         : relationshipsToOmit.has('PythonError')
           ? ({} as PythonError)
           : buildPythonError({}, relationshipsToOmit),
+    appManagedComponentsForLocationOrError:
+      overrides && overrides.hasOwnProperty('appManagedComponentsForLocationOrError')
+        ? overrides.appManagedComponentsForLocationOrError!
+        : relationshipsToOmit.has('AppManagedComponents')
+          ? ({} as AppManagedComponents)
+          : buildAppManagedComponents({}, relationshipsToOmit),
     assetBackfillPreview:
       overrides && overrides.hasOwnProperty('assetBackfillPreview')
         ? overrides.assetBackfillPreview!
@@ -13418,6 +13616,12 @@ export const buildQuery = (
         : relationshipsToOmit.has('CapturedLogsMetadata')
           ? ({} as CapturedLogsMetadata)
           : buildCapturedLogsMetadata({}, relationshipsToOmit),
+    componentTypesForLocationOrError:
+      overrides && overrides.hasOwnProperty('componentTypesForLocationOrError')
+        ? overrides.componentTypesForLocationOrError!
+        : relationshipsToOmit.has('ComponentTypes')
+          ? ({} as ComponentTypes)
+          : buildComponentTypes({}, relationshipsToOmit),
     executionPlanOrError:
       overrides && overrides.hasOwnProperty('executionPlanOrError')
         ? overrides.executionPlanOrError!
@@ -13944,8 +14148,6 @@ export const buildRepository = (
           : buildAssetNodeConnection({}, relationshipsToOmit),
     displayMetadata:
       overrides && overrides.hasOwnProperty('displayMetadata') ? overrides.displayMetadata! : [],
-    hasLocationDocs:
-      overrides && overrides.hasOwnProperty('hasLocationDocs') ? overrides.hasLocationDocs! : false,
     id:
       overrides && overrides.hasOwnProperty('id')
         ? overrides.id!
@@ -13957,12 +14159,6 @@ export const buildRepository = (
         : relationshipsToOmit.has('RepositoryLocation')
           ? ({} as RepositoryLocation)
           : buildRepositoryLocation({}, relationshipsToOmit),
-    locationDocsJsonOrError:
-      overrides && overrides.hasOwnProperty('locationDocsJsonOrError')
-        ? overrides.locationDocsJsonOrError!
-        : relationshipsToOmit.has('LocationDocsJson')
-          ? ({} as LocationDocsJson)
-          : buildLocationDocsJson({}, relationshipsToOmit),
     name: overrides && overrides.hasOwnProperty('name') ? overrides.name! : 'dolor',
     origin:
       overrides && overrides.hasOwnProperty('origin')
@@ -14412,6 +14608,10 @@ export const buildRun = (
       overrides && overrides.hasOwnProperty('assetCheckSelection')
         ? overrides.assetCheckSelection!
         : [],
+    assetCheckSelectionCount:
+      overrides && overrides.hasOwnProperty('assetCheckSelectionCount')
+        ? overrides.assetCheckSelectionCount!
+        : 566,
     assetChecks: overrides && overrides.hasOwnProperty('assetChecks') ? overrides.assetChecks! : [],
     assetMaterializations:
       overrides && overrides.hasOwnProperty('assetMaterializations')
@@ -14419,6 +14619,10 @@ export const buildRun = (
         : [],
     assetSelection:
       overrides && overrides.hasOwnProperty('assetSelection') ? overrides.assetSelection! : [],
+    assetSelectionCount:
+      overrides && overrides.hasOwnProperty('assetSelectionCount')
+        ? overrides.assetSelectionCount!
+        : 5600,
     assets: overrides && overrides.hasOwnProperty('assets') ? overrides.assets! : [],
     canTerminate:
       overrides && overrides.hasOwnProperty('canTerminate') ? overrides.canTerminate! : false,
@@ -15648,6 +15852,23 @@ export const buildSensors = (
   return {
     __typename: 'Sensors',
     results: overrides && overrides.hasOwnProperty('results') ? overrides.results! : [],
+  };
+};
+
+export const buildSetAppManagedComponentSuccess = (
+  overrides?: Partial<SetAppManagedComponentSuccess>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'SetAppManagedComponentSuccess'} & SetAppManagedComponentSuccess => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('SetAppManagedComponentSuccess');
+  return {
+    __typename: 'SetAppManagedComponentSuccess',
+    component:
+      overrides && overrides.hasOwnProperty('component')
+        ? overrides.component!
+        : relationshipsToOmit.has('AppManagedComponent')
+          ? ({} as AppManagedComponent)
+          : buildAppManagedComponent({}, relationshipsToOmit),
   };
 };
 

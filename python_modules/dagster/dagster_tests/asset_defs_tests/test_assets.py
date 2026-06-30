@@ -547,7 +547,7 @@ def test_asset_with_io_manager_key_only():
 
 
 def test_asset_both_io_manager_args_provided():
-    @dg.io_manager  # pyright: ignore[reportCallIssue,reportArgumentType]
+    @dg.io_manager
     def the_io_manager():
         pass
 
@@ -865,7 +865,7 @@ def test_group_name_requirements():
     def good_name():
         return 1
 
-    with pytest.raises(dg.DagsterInvalidDefinitionError, match="not a valid name in Dagster"):
+    with pytest.raises(dg.DagsterInvalidDefinitionError, match="is not a valid asset group name"):
 
         @dg.asset(group_name="bad*name")  # regex mismatch
         def bad_name():
