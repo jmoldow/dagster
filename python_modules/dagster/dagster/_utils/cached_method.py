@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from functools import wraps
+from types import FunctionType
 from typing import TypeVar
 
 from dagster_shared.utils.cached_method import cached_method as cached_method
@@ -44,6 +45,7 @@ def cached_if_true_no_arg_method(method: Callable[[S], bool]) -> Callable[[S], b
             setattr(self, CACHED_IF_TRUE_NO_ARG_METHOD_CACHE_FIELD, {})
 
         cache: dict[str, bool] = getattr(self, CACHED_IF_TRUE_NO_ARG_METHOD_CACHE_FIELD)
+        assert isinstance(method, FunctionType)
         method_name = method.__name__
 
         if method_name in cache:

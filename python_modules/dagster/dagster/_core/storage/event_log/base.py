@@ -627,7 +627,7 @@ class EventLogStorage(ABC, MayHaveInstanceWeakref[T_DagsterInstance]):
         raise NotImplementedError()
 
     @property
-    def supports_asset_checks(self):
+    def supports_asset_checks(self) -> bool:
         return True
 
     @abstractmethod

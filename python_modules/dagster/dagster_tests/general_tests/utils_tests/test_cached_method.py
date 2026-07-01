@@ -4,9 +4,8 @@ import asyncio
 import gc
 import random
 from collections import Counter
-from collections.abc import Iterator
 from itertools import cycle, repeat
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import objgraph
 from dagster._utils.cached_method import cached_if_true_no_arg_method
@@ -15,6 +14,9 @@ from dagster_shared.utils.cached_method import (
     cached_method,
     get_cached_method_cache,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def test_cached_method() -> None:
@@ -208,13 +210,11 @@ def test_explicit_test() -> None:
 
 class TestCachedIfTrueNoArgMethod:
     class MyClass:
-        def __init__(self, return_values: bool | Iterator[bool] | list[bool]) -> None:
+        def __init__(self, return_values: bool | list[bool]) -> None:
             self._return_values: Iterator[bool] = (
-                return_values
-                if isinstance(return_values, Iterator)
-                else repeat(return_values)
+                iter(repeat(return_values))
                 if isinstance(return_values, bool)
-                else cycle(return_values)
+                else iter(cycle(return_values))
             )
             self.call_counts: Counter[str] = Counter()
 

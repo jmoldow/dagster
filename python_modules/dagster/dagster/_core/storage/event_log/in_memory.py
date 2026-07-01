@@ -9,11 +9,15 @@ from typing import Any
 import sqlalchemy as db
 from sqlalchemy.pool import NullPool
 
-from dagster._core.storage.cached_has_table_method import cached_has_table_method
 from dagster._core.storage.event_log.base import EventLogCursor
 from dagster._core.storage.event_log.schema import SqlEventLogStorageMetadata
 from dagster._core.storage.event_log.sql_event_log import SqlEventLogStorage
-from dagster._core.storage.sql import create_engine, get_alembic_config, stamp_alembic_rev
+from dagster._core.storage.sql import (
+    create_engine,
+    get_alembic_config,
+    has_table,
+    stamp_alembic_rev,
+)
 from dagster._core.storage.sqlite import create_in_memory_conn_string
 from dagster._serdes import ConfigurableClass
 from dagster._serdes.config_class import ConfigurableClassData
@@ -65,10 +69,8 @@ class InMemoryEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self):
         return self._connect()
 
-    @cached_has_table_method
     def has_table(self, table_name: str) -> bool:
-        with self._engine.connect() as conn:
-            return bool(self._engine.dialect.has_table(conn, table_name))
+        return has_table(table_name, self, self._engine.connect())
 
     @property
     def inst_data(self):

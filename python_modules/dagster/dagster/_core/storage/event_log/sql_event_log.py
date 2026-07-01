@@ -5,7 +5,6 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from functools import cache, cached_property
 from typing import (  # noqa: UP035
     TYPE_CHECKING,
     AbstractSet,
@@ -89,7 +88,7 @@ from dagster._core.storage.event_log.schema import (
     SecondaryIndexMigrationTable,
     SqlEventLogStorageTable,
 )
-from dagster._core.storage.sql import SqlAlchemyQuery, SqlAlchemyRow
+from dagster._core.storage.sql import SqlAlchemyQuery, SqlAlchemyRow, has_column
 from dagster._core.storage.sqlalchemy_compat import (
     db_case,
     db_fetch_mappings,
@@ -101,7 +100,6 @@ from dagster._core.types.pagination import PaginatedResults, StorageIdCursor
 from dagster._serdes import deserialize_value, serialize_value
 from dagster._time import datetime_from_timestamp, get_current_timestamp, utc_datetime_from_naive
 from dagster._utils import PrintFn
-from dagster._utils.cached_method import cached_if_true_no_arg_method
 from dagster._utils.concurrency import (
     ClaimedSlotInfo,
     ConcurrencyClaimStatus,
@@ -184,13 +182,12 @@ class SqlEventLogStorage(EventLogStorage):
         """
 
     @abstractmethod
-    # @dagster._core.storage.cached_has_table_method.cached_has_table_method
     def has_table(self, table_name: str) -> bool:
         """This method checks if a table exists in the database.
 
-        Concrete subclasses should apply ``@cached_has_table_method`` to this method so that
-        ``True`` results are cached for the lifetime of the instance, avoiding frequent and useless
-        schema-introspection ``db.inspect(conn).get_table_names()`` queries on hot paths.
+        Concrete subclasses should use ``dagster._core.storage.sql.has_table`` to implement this
+        method so that results are cached, avoiding frequent and useless schema-introspection
+        ``db.inspect(conn).get_table_names()`` queries on hot paths.
         """
 
     def prepare_insert_event(self, event: EventLogEntry) -> Any:
@@ -234,7 +231,14 @@ class SqlEventLogStorage(EventLogStorage):
             "partition": partition,
         }
 
-    @cached_if_true_no_arg_method
+    def has_asset_key_col(self, column_name: str) -> bool:
+        return has_column(
+            table_name=AssetKeyTable.name,
+            column_name=column_name,
+            storage=self,
+            connect=self.index_connection(),
+        )
+
     def has_asset_key_index_cols(self) -> bool:
         return self.has_asset_key_col("last_materialization_timestamp")
 
@@ -1244,19 +1248,11 @@ class SqlEventLogStorage(EventLogStorage):
                 )
         return results
 
-    @cached_if_true_no_arg_method
     def can_read_asset_status_cache(self) -> bool:
         return self.has_asset_key_col("cached_status_data")
 
-    @cached_if_true_no_arg_method
     def can_write_asset_status_cache(self) -> bool:
         return self.has_asset_key_col("cached_status_data")
-
-    @cache
-    def has_asset_key_col(self, column_name: str) -> bool:
-        with self.index_connection() as conn:
-            column_names = [x.get("name") for x in db.inspect(conn).get_columns(AssetKeyTable.name)]
-            return column_name in column_names
 
     def wipe_asset_cached_status(self, asset_key: AssetKey) -> None:
         if self.can_read_asset_status_cache():
@@ -2216,24 +2212,25 @@ class SqlEventLogStorage(EventLogStorage):
                 )
             )
 
-    @cached_property
+    @property
     def supports_global_concurrency_limits(self) -> bool:
         return self.has_table(ConcurrencySlotsTable.name)
 
-    @cached_property
+    @property
     def has_default_pool_limit_col(self) -> bool:
         # This table was added later, and to avoid forcing a migration
         # we handle in the code if its been added or not.
         if not self.has_table(ConcurrencyLimitsTable.name):
             return False
 
-        with self.index_connection() as conn:
-            column_names = [
-                x.get("name") for x in db.inspect(conn).get_columns(ConcurrencyLimitsTable.name)
-            ]
-            return ConcurrencyLimitsTable.c.using_default_limit.name in column_names
+        return has_column(
+            table_name=ConcurrencyLimitsTable.name,
+            column_name=ConcurrencyLimitsTable.c.using_default_limit.name,
+            storage=self,
+            connect=self.index_connection(),
+        )
 
-    @cached_property
+    @property
     def has_concurrency_limits_table(self) -> bool:
         # This table was added later, and to avoid forcing a migration
         # we handle in the code if its been added or not.
@@ -3417,8 +3414,8 @@ class SqlEventLogStorage(EventLogStorage):
             )
         return infos
 
-    @cached_property
-    def supports_asset_checks(self):  # pyright: ignore[reportIncompatibleMethodOverride]
+    @property
+    def supports_asset_checks(self):
         return self.has_table(AssetCheckExecutionsTable.name)
 
     def get_latest_planned_materialization_info(

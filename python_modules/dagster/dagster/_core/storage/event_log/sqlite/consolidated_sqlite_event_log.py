@@ -3,7 +3,6 @@ import os
 from collections import defaultdict
 from collections.abc import Mapping
 from contextlib import contextmanager
-from functools import cache, cached_property
 from typing import Any
 
 import sqlalchemy as db
@@ -15,7 +14,6 @@ from watchdog.observers import Observer
 import dagster._check as check
 from dagster._annotations import public
 from dagster._config import StringSource
-from dagster._core.storage.cached_has_table_method import cached_has_table_method
 from dagster._core.storage.dagster_run import DagsterRunStatus
 from dagster._core.storage.event_log.base import EventLogCursor
 from dagster._core.storage.event_log.schema import SqlEventLogStorageMetadata
@@ -24,6 +22,7 @@ from dagster._core.storage.sql import (
     check_alembic_revision,
     create_engine,
     get_alembic_config,
+    has_table,
     run_alembic_upgrade,
     stamp_alembic_rev,
 )
@@ -123,16 +122,13 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self):
         return self._connect()
 
-    @cached_has_table_method
     def has_table(self, table_name: str) -> bool:
         engine = create_engine(
             self._conn_string,
             poolclass=NullPool,
             connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
         )
-        with engine.connect() as conn:
-            has_table = bool(engine.dialect.has_table(conn, table_name))
-        return has_table
+        return has_table(table_name, self, engine.connect())
 
     def get_db_path(self):
         return os.path.join(self._base_dir, f"{SQLITE_EVENT_LOG_FILENAME}.db")
@@ -162,7 +158,7 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
         self._watchers[run_id][callback] = cursor
 
-    @cached_property
+    @property
     def supports_global_concurrency_limits(self) -> bool:
         return self.has_table("concurrency_limits")
 

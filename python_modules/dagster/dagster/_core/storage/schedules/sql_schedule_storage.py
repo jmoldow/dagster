@@ -2,7 +2,6 @@ from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from functools import cache, cached_property
 from typing import Any, Callable, ContextManager, NamedTuple, TypeVar  # noqa: UP035
 
 import sqlalchemy as db
@@ -39,7 +38,7 @@ from dagster._core.storage.schedules.schema import (
     JobTickTable,
     SecondaryIndexMigrationTable,
 )
-from dagster._core.storage.sql import SqlAlchemyQuery, SqlAlchemyRow
+from dagster._core.storage.sql import SqlAlchemyQuery, SqlAlchemyRow, has_table
 from dagster._core.storage.sqlalchemy_compat import (
     db_fetch_mappings,
     db_result,
@@ -273,21 +272,14 @@ class SqlScheduleStorage(ScheduleStorage):
         return query
 
     @property
-    @cached_if_true_no_arg_method
     def supports_batch_queries(self) -> bool:
         return self.has_instigators_table() and self.has_built_index(SCHEDULE_TICKS_SELECTOR_ID)
 
-    @cached_if_true_no_arg_method
     def has_instigators_table(self) -> bool:
-        with self.connect() as conn:
-            table_names = db.inspect(conn).get_table_names()
-            return "instigators" in table_names
+        return has_table("instigators", self, self.connect())
 
-    @cached_if_true_no_arg_method
     def _has_asset_daemon_asset_evaluations_table(self) -> bool:
-        with self.connect() as conn:
-            table_names = db.inspect(conn).get_table_names()
-            return "asset_daemon_asset_evaluations" in table_names
+        return has_table("asset_daemon_asset_evaluations", self, self.connect())
 
     def get_batch_ticks(
         self,
@@ -476,7 +468,7 @@ class SqlScheduleStorage(ScheduleStorage):
         with self.connect() as conn:
             conn.execute(query)
 
-    @cached_property
+    @property
     def supports_auto_materialize_asset_evaluations(self) -> bool:
         return self._has_asset_daemon_asset_evaluations_table()
 
@@ -585,10 +577,8 @@ class SqlScheduleStorage(ScheduleStorage):
 
     # MIGRATIONS
 
-    @cached_if_true_no_arg_method
     def has_secondary_index_table(self) -> bool:
-        with self.connect() as conn:
-            return "secondary_indexes" in db.inspect(conn).get_table_names()
+        return has_table("secondary_indexes", self, self.connect())
 
     @cache
     def has_built_index(self, migration_name: str) -> bool:

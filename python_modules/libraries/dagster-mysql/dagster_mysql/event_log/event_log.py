@@ -1,4 +1,3 @@
-from functools import cache
 from typing import ContextManager, cast  # noqa: UP035
 
 import dagster._check as check
@@ -9,7 +8,6 @@ import sqlalchemy.pool as db_pool
 from dagster._config.config_schema import UserConfigSchema
 from dagster._core.event_api import EventHandlerFn
 from dagster._core.events.log import EventLogEntry
-from dagster._core.storage.cached_has_table_method import cached_has_table_method
 from dagster._core.storage.config import MySqlStorageConfig, mysql_config
 from dagster._core.storage.event_log import (
     AssetKeyTable,
@@ -23,6 +21,7 @@ from dagster._core.storage.sql import (
     AlembicVersion,
     check_alembic_revision,
     create_engine,
+    has_table,
     run_alembic_upgrade,
     stamp_alembic_rev,
 )
@@ -188,10 +187,8 @@ class MySQLEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self) -> ContextManager[Connection]:
         return self._connect()
 
-    @cached_has_table_method
     def has_table(self, table_name: str) -> bool:
-        with self._connect() as conn:
-            return table_name in db.inspect(conn).get_table_names()
+        return has_table(table_name, self, self._connect())
 
     def has_secondary_index(self, name: str) -> bool:
         if name not in self._secondary_index_cache:

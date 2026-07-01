@@ -6,7 +6,6 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
-from functools import cache
 from typing import Any, Callable, ContextManager, NamedTuple, cast  # noqa: UP035
 
 import sqlalchemy as db
@@ -60,7 +59,7 @@ from dagster._core.storage.runs.schema import (
     SecondaryIndexMigrationTable,
     SnapshotsTable,
 )
-from dagster._core.storage.sql import SqlAlchemyQuery
+from dagster._core.storage.sql import SqlAlchemyQuery, get_columns, has_column, has_table
 from dagster._core.storage.sqlalchemy_compat import (
     db_fetch_mappings,
     db_result,
@@ -80,7 +79,6 @@ from dagster._daemon.types import DaemonHeartbeat
 from dagster._serdes import deserialize_value, serialize_value
 from dagster._time import datetime_from_timestamp, get_current_datetime, utc_datetime_from_naive
 from dagster._utils import PrintFn
-from dagster._utils.cached_method import cached_if_true_no_arg_method
 from dagster._utils.merger import merge_dicts
 
 
@@ -822,38 +820,36 @@ class SqlRunStorage(RunStorage):
 
     # Checking for migrations
 
-    @cached_if_true_no_arg_method
     def has_run_stats_index_cols(self) -> bool:
-        with self.connect() as conn:
-            column_names = [x.get("name") for x in db.inspect(conn).get_columns(RunsTable.name)]
-            return "start_time" in column_names and "end_time" in column_names
+        column_names = get_columns(RunsTable.name, self, self.connect())
+        return "start_time" in column_names and "end_time" in column_names
 
-    @cached_if_true_no_arg_method
     def has_bulk_actions_selector_cols(self) -> bool:
-        with self.connect() as conn:
-            column_names = [
-                x.get("name") for x in db.inspect(conn).get_columns(BulkActionsTable.name)
-            ]
-            return "selector_id" in column_names
+        return has_column(
+            table_name=BulkActionsTable.name,
+            column_name="selector_id",
+            storage=self,
+            connect=self.connect(),
+        )
 
-    @cached_if_true_no_arg_method
     def has_backfill_id_column(self) -> bool:
-        with self.connect() as conn:
-            column_names = [x.get("name") for x in db.inspect(conn).get_columns(RunsTable.name)]
-            return "backfill_id" in column_names
+        return has_column(
+            table_name=RunsTable.name,
+            column_name="backfill_id",
+            storage=self,
+            connect=self.connect(),
+        )
 
-    @cached_if_true_no_arg_method
     def has_bulk_action_job_name_column(self) -> bool:
-        with self.connect() as conn:
-            column_names = [
-                x.get("name") for x in db.inspect(conn).get_columns(BulkActionsTable.name)
-            ]
-            return "job_name" in column_names
+        return has_column(
+            table_name=BulkActionsTable.name,
+            column_name="job_name",
+            storage=self,
+            connect=self.connect(),
+        )
 
-    @cached_if_true_no_arg_method
     def has_backfill_tags_table(self) -> bool:
-        with self.connect() as conn:
-            return BackfillTagsTable.name in db.inspect(conn).get_table_names()
+        return has_table(BackfillTagsTable.name, self, self.connect())
 
     # Daemon heartbeats
 

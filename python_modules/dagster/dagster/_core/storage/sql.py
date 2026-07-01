@@ -1,6 +1,10 @@
+import dataclasses
 import threading
+import time
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, TypeAlias
+from typing import Any, ClassVar, TypeAlias
 
 import sqlalchemy as db
 from alembic.command import downgrade, stamp, upgrade
@@ -11,6 +15,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.compiler import compiles
 
+from dagster._serdes import ConfigurableClass, ConfigurableClassData
 from dagster._utils import file_relative_path
 
 create_engine = db.create_engine  # exported
@@ -25,6 +30,8 @@ SqlAlchemyQuery: TypeAlias = Any
 SqlAlchemyRow: TypeAlias = Any
 
 AlembicVersion: TypeAlias = tuple[str | None, str | tuple[str, ...] | None]
+
+ConnectionContextManager: TypeAlias = AbstractContextManager[Connection]
 
 
 @lru_cache(maxsize=3)  # run, event, and schedule storages
@@ -47,6 +54,8 @@ def run_alembic_upgrade(
     alembic_config.attributes["connection"] = conn
     alembic_config.attributes["run_id"] = run_id
     upgrade(alembic_config, rev)
+    with global_cache.lock:
+        Cache.global_alembic_counter += 1
 
 
 def run_alembic_downgrade(
@@ -55,16 +64,191 @@ def run_alembic_downgrade(
     alembic_config.attributes["connection"] = conn
     alembic_config.attributes["run_id"] = run_id
     downgrade(alembic_config, rev)
+    with global_cache.lock:
+        Cache.global_alembic_counter += 1
 
 
 # Ensure that at most one thread can be stamping alembic revisions at once
 _alembic_lock = threading.Lock()
 
 
+@dataclass(kw_only=True)
+class CacheData:
+    key: tuple[str, ConfigurableClassData] | None
+    monotonic_timestamp: float = dataclasses.field(default_factory=time.monotonic)
+    alembic_counter: int = dataclasses.field(
+        default_factory=lambda: int(Cache.global_alembic_counter)
+    )
+    table_names: list[str] | None = None
+    columns: dict[str, list[str]] = dataclasses.field(default_factory=dict)
+    indexes: dict[str, list[str]] = dataclasses.field(default_factory=dict)
+    _lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+
+    def get_table_names(self, connect: ConnectionContextManager) -> list[str]:
+        if self.table_names:
+            return self.table_names
+        with connect as conn:
+            del connect
+            table_names = db.inspect(conn).get_table_names()
+        if self.key is None:
+            return table_names
+        with self._lock:
+            if not self.table_names:
+                self.table_names = table_names
+        return self.table_names
+
+    def has_table(self, table_name: str, connect: ConnectionContextManager) -> bool:
+        if self.key is None:
+            with connect as conn:
+                del connect
+                return db.inspect(conn).has_table(table_name)
+        return table_name in self.get_table_names(connect)
+
+    def get_columns(self, table_name: str, connect: ConnectionContextManager) -> list[str]:
+        if table_name in self.columns:
+            return self.columns[table_name]
+        with connect as conn:
+            del connect
+            columns = [x.get("name") for x in db.inspect(conn).get_columns(table_name)]
+        if self.key is None:
+            return columns
+        with self._lock:
+            return self.columns.setdefault(table_name, columns)
+
+    def get_indexes(self, table_name: str, connect: ConnectionContextManager) -> list[str]:
+        if table_name in self.indexes:
+            return self.indexes[table_name]
+        with connect as conn:
+            del connect
+            indexes = [
+                name for x in db.inspect(conn).get_indexes(table_name) if (name := x.get("name"))
+            ]
+        if self.key is None:
+            return indexes
+        with self._lock:
+            return self.indexes.setdefault(table_name, indexes)
+
+    def has_column(
+        self, *, table_name: str, column_name: str, connect: ConnectionContextManager
+    ) -> bool:
+        return column_name in self.get_columns(table_name, connect)
+
+    def has_index(
+        self, *, table_name: str, index_name: str, connect: ConnectionContextManager
+    ) -> bool:
+        if self.key is None:
+            with connect as conn:
+                del connect
+                return db.inspect(conn).has_index(table_name=table_name, index_name=index_name)
+        return index_name in self.get_indexes(table_name, connect)
+
+
+class Cache:
+    global_alembic_counter: ClassVar[int] = 0
+    _cache: dict[tuple[str, ConfigurableClassData], CacheData]
+    _uncached: CacheData
+    lock: threading.Lock
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._cache = {}
+        self._uncached = CacheData(key=None)
+        self.lock = threading.Lock()
+
+    def get(self, storage: ConfigurableClass | object) -> CacheData:
+        if not isinstance(storage, ConfigurableClass):
+            return self._uncached
+        # check
+        assert storage.inst_data
+        key = (storage.__class__.__name__, storage.inst_data)
+        data = self._cache.get(key)
+        if data is not None:
+            if (
+                data.alembic_counter != self.__class__.global_alembic_counter
+                or time.monotonic() >= (data.monotonic_timestamp + 600)
+            ):
+                with self.lock:
+                    self._cache.pop(key, None)
+                data = None
+        if data is None:
+            data = CacheData(key=key)
+            with self.lock:
+                data = self._cache.setdefault(key, data)
+        return data
+
+    def get_table_names(
+        self, storage: ConfigurableClass | object, connect: ConnectionContextManager
+    ) -> list[str]:
+        return self.get(storage).get_table_names(connect)
+
+    def has_table(
+        self,
+        table_name: str,
+        storage: ConfigurableClass | object,
+        connect: ConnectionContextManager,
+    ) -> bool:
+        return self.get(storage).has_table(table_name, connect)
+
+    def get_columns(
+        self,
+        table_name: str,
+        storage: ConfigurableClass | object,
+        connect: ConnectionContextManager,
+    ) -> list[str]:
+        return self.get(storage).get_columns(table_name, connect)
+
+    def get_indexes(
+        self,
+        table_name: str,
+        storage: ConfigurableClass | object,
+        connect: ConnectionContextManager,
+    ) -> list[str]:
+        return self.get(storage).get_indexes(table_name, connect)
+
+    def has_column(
+        self,
+        *,
+        table_name: str,
+        column_name: str,
+        storage: ConfigurableClass | object,
+        connect: ConnectionContextManager,
+    ) -> bool:
+        return self.get(storage).has_column(
+            table_name=table_name,
+            column_name=column_name,
+            connect=connect,
+        )
+
+    def has_index(
+        self,
+        *,
+        table_name: str,
+        index_name: str,
+        storage: ConfigurableClass | object,
+        connect: ConnectionContextManager,
+    ) -> bool:
+        return self.get(storage).has_index(
+            table_name=table_name, index_name=index_name, connect=connect
+        )
+
+
+global_cache = Cache()
+
+
+get_table_names = global_cache.get_table_names
+has_table = global_cache.has_table
+get_columns = global_cache.get_columns
+get_indexes = global_cache.get_indexes
+has_column = global_cache.has_column
+has_index = global_cache.has_index
+
+
 def stamp_alembic_rev(alembic_config: Config, conn: Connection, rev: str = "head") -> None:
     with _alembic_lock:
         alembic_config.attributes["connection"] = conn
         stamp(alembic_config, rev)
+    with global_cache.lock:
+        Cache.global_alembic_counter += 1
 
 
 def check_alembic_revision(alembic_config: Config, conn: Connection) -> AlembicVersion:

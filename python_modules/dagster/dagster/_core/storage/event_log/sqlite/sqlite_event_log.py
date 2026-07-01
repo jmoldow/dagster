@@ -9,7 +9,6 @@ import time
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from functools import cache, cached_property
 from typing import TYPE_CHECKING, Any, ContextManager  # noqa: UP035
 
 import dagster_shared.seven as seven
@@ -37,7 +36,6 @@ from dagster._core.events import (
 )
 from dagster._core.events.log import EventLogEntry
 from dagster._core.instance import RUNLESS_RUN_ID
-from dagster._core.storage.cached_has_table_method import cached_has_table_method
 from dagster._core.storage.dagster_run import DagsterRunStatus, RunsFilter
 from dagster._core.storage.event_log.base import EventLogCursor, EventLogRecord, EventRecordsFilter
 from dagster._core.storage.event_log.schema import (
@@ -50,6 +48,7 @@ from dagster._core.storage.sql import (
     check_alembic_revision,
     create_engine,
     get_alembic_config,
+    has_table,
     run_alembic_upgrade,
     safe_commit,
     stamp_alembic_rev,
@@ -162,7 +161,6 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             if os.path.splitext(os.path.basename(filename))[0] != INDEX_SHARD_NAME
         ]
 
-    @cached_has_table_method
     def has_table(self, table_name: str) -> bool:
         conn_string = self.conn_string_for_shard(INDEX_SHARD_NAME)
         engine = create_engine(
@@ -170,8 +168,7 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             poolclass=NullPool,
             connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
         )
-        with engine.connect() as conn:
-            return bool(engine.dialect.has_table(conn, table_name))
+        return has_table(table_name, self, engine.connect())
 
     def path_for_shard(self, run_id: str) -> str:
         return os.path.join(self._base_dir, f"{run_id}.db")
@@ -525,7 +522,7 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def is_run_sharded(self) -> bool:
         return True
 
-    @cached_property
+    @property
     def supports_global_concurrency_limits(self) -> bool:
         return self.has_table("concurrency_limits")
 
