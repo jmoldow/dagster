@@ -1,11 +1,12 @@
 import logging
 import os
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
 import sqlalchemy as db
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.pool import NullPool
 from typing_extensions import Self
 from watchdog.events import PatternMatchingEventHandler
@@ -29,6 +30,7 @@ from dagster._core.storage.sql import (
 from dagster._core.storage.sqlite import SQLITE_BUSY_TIMEOUT_SECONDS, create_db_conn_string
 from dagster._serdes import ConfigurableClass, ConfigurableClassData
 from dagster._utils import mkdir_p
+from dagster._utils.cached_method import cached_if_true_no_arg_method
 
 SQLITE_EVENT_LOG_FILENAME = "event_log"
 
@@ -58,6 +60,11 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def __init__(self, base_dir, inst_data: ConfigurableClassData | None = None):
         self._base_dir = check.str_param(base_dir, "base_dir")
         self._conn_string = create_db_conn_string(base_dir, SQLITE_EVENT_LOG_FILENAME)
+        self._engine = create_engine(
+            self._conn_string,
+            poolclass=NullPool,
+            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
+        )
         self._secondary_index_cache = {}
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
         self._watchers = defaultdict(dict)
@@ -84,18 +91,13 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
     def _init_db(self):
         mkdir_p(self._base_dir)
-        engine = create_engine(
-            self._conn_string,
-            poolclass=NullPool,
-            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
-        )
         alembic_config = get_alembic_config(__file__)
 
         should_mark_indexes = False
-        with engine.connect() as connection:
+        with self._engine.connect() as connection:
             db_revision, head_revision = check_alembic_revision(alembic_config, connection)
             if not (db_revision and head_revision):
-                SqlEventLogStorageMetadata.create_all(engine)
+                SqlEventLogStorageMetadata.create_all(self._engine)
                 connection.execute(db.text("PRAGMA journal_mode=WAL;"))
                 stamp_alembic_rev(alembic_config, connection)
                 should_mark_indexes = True
@@ -106,29 +108,23 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             self.reindex_assets()
 
     @contextmanager
-    def _connect(self):
-        engine = create_engine(
-            self._conn_string,
-            poolclass=NullPool,
-            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
-        )
-        with engine.connect() as conn:
+    def _connect(self) -> Iterator[Connection]:
+        with self._engine.connect() as conn:
             with conn.begin():
                 yield conn
 
     def run_connection(self, run_id: str | None) -> SqlDbConnection:
         return self._connect()
 
-    def index_connection(self):
+    def index_connection(self) -> SqlDbConnection:
         return self._connect()
 
+    @property
+    def index_url(self) -> URL:
+        return self._engine.url
+
     def has_table(self, table_name: str) -> bool:
-        engine = create_engine(
-            self._conn_string,
-            poolclass=NullPool,
-            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
-        )
-        return has_table(table_name, self, engine.connect())
+        return has_table(table_name, self._engine.url, self, self._engine.connect())
 
     def get_db_path(self):
         return os.path.join(self._base_dir, f"{SQLITE_EVENT_LOG_FILENAME}.db")
@@ -138,6 +134,7 @@ class ConsolidatedSqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         with self._connect() as conn:
             run_alembic_upgrade(alembic_config, conn)
 
+    @cached_if_true_no_arg_method
     def has_secondary_index(self, name):
         if name not in self._secondary_index_cache:
             self._secondary_index_cache[name] = super().has_secondary_index(name)

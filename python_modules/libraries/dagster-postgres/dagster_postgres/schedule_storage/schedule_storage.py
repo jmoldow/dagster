@@ -27,7 +27,7 @@ from dagster._core.storage.sql import (
 from dagster._serdes import ConfigurableClass, ConfigurableClassData, serialize_value
 from dagster._time import get_current_datetime
 from sqlalchemy import event
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 from dagster_postgres.utils import (
     create_pg_connection,
@@ -168,6 +168,10 @@ class PostgresScheduleStorage(SqlScheduleStorage, ConfigurableClass):
 
     def connect(self, run_id: str | None = None) -> ContextManager[Connection]:
         return create_pg_connection(self._engine)
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     def upgrade(self) -> None:
         alembic_config = pg_alembic_config(__file__)

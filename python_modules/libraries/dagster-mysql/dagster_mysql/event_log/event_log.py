@@ -21,13 +21,14 @@ from dagster._core.storage.sql import (
     AlembicVersion,
     check_alembic_revision,
     create_engine,
+    get_table_names,
     has_table,
     run_alembic_upgrade,
     stamp_alembic_rev,
 )
 from dagster._core.storage.sqlalchemy_compat import db_result
 from dagster._serdes import ConfigurableClass, ConfigurableClassData
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 from dagster_mysql.utils import (
     create_mysql_connection,
@@ -70,7 +71,9 @@ class MySQLEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         )
         self._secondary_index_cache = {}
 
-        table_names = retry_mysql_connection_fn(db.inspect(self._engine).get_table_names)
+        table_names = retry_mysql_connection_fn(
+            lambda: get_table_names(self._engine.url, self, self._connect())
+        )
 
         # Stamp and create tables if the main table does not exist (we can't check alembic
         # revision because alembic config may be shared with other storage classes)
@@ -187,8 +190,12 @@ class MySQLEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self) -> ContextManager[Connection]:
         return self._connect()
 
+    @property
+    def index_url(self) -> URL:
+        return self._engine.url
+
     def has_table(self, table_name: str) -> bool:
-        return has_table(table_name, self, self._connect())
+        return has_table(table_name, self._engine.url, self, self._connect())
 
     def has_secondary_index(self, name: str) -> bool:
         if name not in self._secondary_index_cache:

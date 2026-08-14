@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 import sqlalchemy as db
 from packaging.version import parse
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.pool import NullPool
 
 from dagster import (
@@ -18,6 +18,7 @@ from dagster._core.storage.sql import (
     check_alembic_revision,
     create_engine,
     get_alembic_config,
+    get_table_names,
     run_alembic_upgrade,
     safe_commit,
     stamp_alembic_rev,
@@ -39,6 +40,7 @@ class SqliteScheduleStorage(SqlScheduleStorage, ConfigurableClass):
     def __init__(self, conn_string: str, inst_data: ConfigurableClassData | None = None):
         check.str_param(conn_string, "conn_string")
         self._conn_string = conn_string
+        self._engine = create_engine(self._conn_string, poolclass=NullPool)
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
 
         super().__init__()
@@ -67,11 +69,13 @@ class SqliteScheduleStorage(SqlScheduleStorage, ConfigurableClass):
         engine = create_engine(conn_string, poolclass=NullPool)
         alembic_config = get_alembic_config(__file__)
 
+        schedule_storage = cls(conn_string, inst_data)
+
         should_migrate_data = False
+        table_names = get_table_names(engine.url, schedule_storage, engine.connect())
         with engine.connect() as connection:
             db_revision, head_revision = check_alembic_revision(alembic_config, connection)
             if not (db_revision and head_revision):
-                table_names = db.inspect(engine).get_table_names()
                 if "job_ticks" in table_names:
                     # The ticks table exists but the alembic version table does not. This means that the SQLite db was
                     # initialized with SQLAlchemy 2.0 before https://github.com/dagster-io/dagster/pull/25740 was merged.
@@ -86,20 +90,21 @@ class SqliteScheduleStorage(SqlScheduleStorage, ConfigurableClass):
                 stamp_alembic_rev(alembic_config, connection, rev=rev_to_stamp)
                 safe_commit(connection)
 
-        schedule_storage = cls(conn_string, inst_data)
         if should_migrate_data:
             schedule_storage.migrate()
             schedule_storage.optimize()
-            schedule_storage = cls(conn_string, inst_data)
 
-        return schedule_storage
+        return cls(conn_string, inst_data)
 
     @contextmanager
     def connect(self) -> Iterator[Connection]:
-        engine = create_engine(self._conn_string, poolclass=NullPool)
-        with engine.connect() as conn:
+        with self._engine.connect() as conn:
             with conn.begin():
                 yield conn
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     @property
     def supports_batch_queries(self) -> bool:

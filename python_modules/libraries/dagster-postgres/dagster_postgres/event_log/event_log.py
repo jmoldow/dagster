@@ -26,6 +26,7 @@ from dagster._core.storage.sql import (
     AlembicVersion,
     check_alembic_revision,
     create_engine,
+    get_table_names,
     has_table,
     run_alembic_upgrade,
     stamp_alembic_rev,
@@ -33,7 +34,7 @@ from dagster._core.storage.sql import (
 from dagster._core.storage.sqlalchemy_compat import db_result, db_select
 from dagster._serdes import ConfigurableClass, ConfigurableClassData, deserialize_value
 from sqlalchemy import event
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 from dagster_postgres.utils import (
     create_pg_connection,
@@ -109,7 +110,9 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         # Stamp and create tables if the main table does not exist (we can't check alembic
         # revision because alembic config may be shared with other storage classes)
         if self.should_autocreate_tables:
-            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+            table_names = retry_pg_connection_fn(
+                lambda: get_table_names(self._engine.url, self, self._engine.connect())
+            )
             if "event_logs" not in table_names:
                 retry_pg_creation_fn(self._init_db)
                 self.reindex_events()
@@ -344,6 +347,10 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     def index_connection(self) -> ContextManager[Connection]:
         return self._connect()
 
+    @property
+    def index_url(self) -> URL:
+        return self._engine.url
+
     @contextmanager
     def index_transaction(self) -> Iterator[Connection]:
         """Context manager yielding a connection to the index shard that has begun a transaction."""
@@ -356,7 +363,7 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
                     yield conn
 
     def has_table(self, table_name: str) -> bool:
-        return has_table(table_name, self, self._connect())
+        return has_table(table_name, self._engine.url, self, self._connect())
 
     def has_secondary_index(self, name: str) -> bool:
         if name not in self._secondary_index_cache:

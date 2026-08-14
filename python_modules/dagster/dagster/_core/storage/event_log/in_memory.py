@@ -2,11 +2,12 @@ import logging
 import threading
 import uuid
 from collections import defaultdict
-from collections.abc import Callable
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
 import sqlalchemy as db
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.pool import NullPool
 
 from dagster._core.storage.event_log.base import EventLogCursor
@@ -55,7 +56,7 @@ class InMemoryEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         return True
 
     @contextmanager
-    def _connect(self):
+    def _connect(self) -> Iterator[Connection]:
         with self._db_lock:
             with self._engine.connect() as conn:
                 with conn.begin():
@@ -63,14 +64,18 @@ class InMemoryEventLogStorage(SqlEventLogStorage, ConfigurableClass):
                     conn.execute(db.text("PRAGMA foreign_keys=ON;")).close()
                     yield conn
 
-    def run_connection(self, run_id=None):
+    def run_connection(self, run_id=None) -> AbstractContextManager[Connection]:
         return self._connect()
 
-    def index_connection(self):
+    def index_connection(self) -> AbstractContextManager[Connection]:
         return self._connect()
+
+    @property
+    def index_url(self) -> URL:
+        return self._engine.url
 
     def has_table(self, table_name: str) -> bool:
-        return has_table(table_name, self, self._engine.connect())
+        return has_table(table_name, self._engine.url, self, self._engine.connect())
 
     @property
     def inst_data(self):

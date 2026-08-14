@@ -7,7 +7,7 @@ from typing import Any, Callable, ContextManager, NamedTuple, TypeVar  # noqa: U
 import sqlalchemy as db
 import sqlalchemy.exc as db_exc
 from dagster_shared.serdes import deserialize_value
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 import dagster._check as check
 from dagster._core.definitions.asset_key import EntityKey
@@ -59,6 +59,11 @@ class SqlScheduleStorage(ScheduleStorage):
     @abstractmethod
     def connect(self) -> ContextManager[Connection]:
         """Context manager yielding a sqlalchemy.engine.Connection."""
+
+    @property
+    @abstractmethod
+    def url(self) -> URL:
+        pass
 
     def execute(self, query: SqlAlchemyQuery) -> Sequence[SqlAlchemyRow]:
         with self.connect() as conn:
@@ -276,10 +281,10 @@ class SqlScheduleStorage(ScheduleStorage):
         return self.has_instigators_table() and self.has_built_index(SCHEDULE_TICKS_SELECTOR_ID)
 
     def has_instigators_table(self) -> bool:
-        return has_table("instigators", self, self.connect())
+        return has_table("instigators", self.url, self, self.connect())
 
     def _has_asset_daemon_asset_evaluations_table(self) -> bool:
-        return has_table("asset_daemon_asset_evaluations", self, self.connect())
+        return has_table("asset_daemon_asset_evaluations", self.url, self, self.connect())
 
     def get_batch_ticks(
         self,
@@ -578,9 +583,9 @@ class SqlScheduleStorage(ScheduleStorage):
     # MIGRATIONS
 
     def has_secondary_index_table(self) -> bool:
-        return has_table("secondary_indexes", self, self.connect())
+        return has_table("secondary_indexes", self.url, self, self.connect())
 
-    @cache
+    @cached_if_true_no_arg_method
     def has_built_index(self, migration_name: str) -> bool:
         if not self.has_secondary_index_table():
             return False

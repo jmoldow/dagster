@@ -12,7 +12,7 @@ import sqlalchemy as db
 import sqlalchemy.exc as db_exc
 from dagster_shared.serdes import deserialize_values
 from dagster_shared.seven import JSONDecodeError
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 import dagster._check as check
 from dagster._core.errors import (
@@ -79,6 +79,7 @@ from dagster._daemon.types import DaemonHeartbeat
 from dagster._serdes import deserialize_value, serialize_value
 from dagster._time import datetime_from_timestamp, get_current_datetime, utc_datetime_from_naive
 from dagster._utils import PrintFn
+from dagster._utils.cached_method import cached_if_true_no_arg_method
 from dagster._utils.merger import merge_dicts
 
 
@@ -93,6 +94,11 @@ class SqlRunStorage(RunStorage):
     @abstractmethod
     def connect(self) -> ContextManager[Connection]:
         """Context manager yielding a sqlalchemy.engine.Connection."""
+
+    @property
+    @abstractmethod
+    def url(self) -> URL:
+        pass
 
     @abstractmethod
     def upgrade(self) -> None:
@@ -791,7 +797,7 @@ class SqlRunStorage(RunStorage):
     def optimize(self, print_fn: PrintFn | None = None, force_rebuild_all: bool = False) -> None:
         self._execute_data_migrations(OPTIONAL_DATA_MIGRATIONS, print_fn, force_rebuild_all)
 
-    @cache
+    @cached_if_true_no_arg_method
     def has_built_index(self, migration_name: str) -> bool:
         query = (
             db_select([1])
@@ -821,13 +827,14 @@ class SqlRunStorage(RunStorage):
     # Checking for migrations
 
     def has_run_stats_index_cols(self) -> bool:
-        column_names = get_columns(RunsTable.name, self, self.connect())
+        column_names = get_columns(RunsTable.name, self.url, self, self.connect())
         return "start_time" in column_names and "end_time" in column_names
 
     def has_bulk_actions_selector_cols(self) -> bool:
         return has_column(
             table_name=BulkActionsTable.name,
             column_name="selector_id",
+            url=self.url,
             storage=self,
             connect=self.connect(),
         )
@@ -836,6 +843,7 @@ class SqlRunStorage(RunStorage):
         return has_column(
             table_name=RunsTable.name,
             column_name="backfill_id",
+            url=self.url,
             storage=self,
             connect=self.connect(),
         )
@@ -844,12 +852,13 @@ class SqlRunStorage(RunStorage):
         return has_column(
             table_name=BulkActionsTable.name,
             column_name="job_name",
+            url=self.url,
             storage=self,
             connect=self.connect(),
         )
 
     def has_backfill_tags_table(self) -> bool:
-        return has_table(BackfillTagsTable.name, self, self.connect())
+        return has_table(BackfillTagsTable.name, self.url, self, self.connect())
 
     # Daemon heartbeats
 

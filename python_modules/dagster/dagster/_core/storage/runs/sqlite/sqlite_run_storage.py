@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlparse
 
 import sqlalchemy as db
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.pool import NullPool
 from typing_extensions import Self
 
@@ -26,6 +26,7 @@ from dagster._core.storage.sql import (
     check_alembic_revision,
     create_engine,
     get_alembic_config,
+    get_table_names,
     run_alembic_downgrade,
     run_alembic_upgrade,
     safe_commit,
@@ -69,6 +70,7 @@ class SqliteRunStorage(SqlRunStorage, ConfigurableClass):
     def __init__(self, conn_string: str, inst_data: ConfigurableClassData | None = None):
         check.str_param(conn_string, "conn_string")
         self._conn_string = conn_string
+        self._engine = create_engine(self._conn_string, poolclass=NullPool)
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
         super().__init__()
 
@@ -94,10 +96,12 @@ class SqliteRunStorage(SqlRunStorage, ConfigurableClass):
         engine = create_engine(conn_string, poolclass=NullPool)
         alembic_config = get_alembic_config(__file__)
 
+        run_storage = cls(conn_string, inst_data)
+
         should_mark_indexes = False
+        table_names = get_table_names(engine.url, run_storage, engine.connect())
         with engine.connect() as connection:
             db_revision, head_revision = check_alembic_revision(alembic_config, connection)
-            table_names = db.inspect(engine).get_table_names()
             if not (db_revision and head_revision):
                 if "runs" in table_names:
                     # The runs table exists but the alembic version table does not. This means that the SQLite db was
@@ -114,25 +118,26 @@ class SqliteRunStorage(SqlRunStorage, ConfigurableClass):
                 stamp_alembic_rev(alembic_config, connection, rev=rev_to_stamp)
                 safe_commit(connection)
 
-            table_names = db.inspect(engine).get_table_names()
+                table_names = db.inspect(engine).get_table_names()
+
             if "instance_info" not in table_names:
                 InstanceInfo.create(engine)
-
-        run_storage = cls(conn_string, inst_data)
 
         if should_mark_indexes:
             run_storage.migrate()
             run_storage.optimize()
-            run_storage = cls(conn_string, inst_data)
 
-        return run_storage
+        return cls(conn_string, inst_data)
 
     @contextmanager
     def connect(self) -> Iterator[Connection]:
-        engine = create_engine(self._conn_string, poolclass=NullPool)
-        with engine.connect() as conn:
+        with self._engine.connect() as conn:
             with conn.begin():
                 yield conn
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     def _alembic_upgrade(self, rev: str = "head") -> None:
         alembic_config = get_alembic_config(__file__)

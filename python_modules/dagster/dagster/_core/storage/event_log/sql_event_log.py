@@ -20,7 +20,7 @@ import sqlalchemy as db
 import sqlalchemy.exc as db_exc
 from dagster_shared.serdes import deserialize_values
 from dagster_shared.serdes.errors import DeserializationError
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 import dagster._check as check
 from dagster._core.assets import AssetDetails
@@ -165,6 +165,11 @@ class SqlEventLogStorage(EventLogStorage):
     def index_connection(self) -> ContextManager[Connection]:
         """Context manager yielding a connection to access cross-run indexed tables."""
 
+    @property
+    @abstractmethod
+    def index_url(self) -> URL:
+        pass
+
     @contextmanager
     def index_transaction(self) -> Iterator[Connection]:
         """Context manager yielding a connection to the index shard that has begun a transaction."""
@@ -235,6 +240,7 @@ class SqlEventLogStorage(EventLogStorage):
         return has_column(
             table_name=AssetKeyTable.name,
             column_name=column_name,
+            url=self.index_url,
             storage=self,
             connect=self.index_connection(),
         )
@@ -2226,6 +2232,7 @@ class SqlEventLogStorage(EventLogStorage):
         return has_column(
             table_name=ConcurrencyLimitsTable.name,
             column_name=ConcurrencyLimitsTable.c.using_default_limit.name,
+            url=self.index_url,
             storage=self,
             connect=self.index_connection(),
         )

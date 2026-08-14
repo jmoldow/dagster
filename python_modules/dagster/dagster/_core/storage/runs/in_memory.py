@@ -3,7 +3,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
 import sqlalchemy as db
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.pool import NullPool
 
 from dagster._core.debug import DebugRunPayload
@@ -63,6 +63,10 @@ class InMemoryRunStorage(SqlRunStorage):
                 conn.execute(db.text("PRAGMA journal_mode=WAL;")).close()
                 conn.execute(db.text("PRAGMA foreign_keys=ON;")).close()
                 yield conn
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     def upgrade(self) -> None:
         pass

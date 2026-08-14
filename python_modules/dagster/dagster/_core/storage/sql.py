@@ -12,7 +12,7 @@ from alembic.config import Config
 from alembic.runtime.environment import EnvironmentContext
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 from sqlalchemy.ext.compiler import compiles
 
 from dagster._serdes import ConfigurableClass, ConfigurableClassData
@@ -74,7 +74,7 @@ _alembic_lock = threading.Lock()
 
 @dataclass(kw_only=True)
 class CacheData:
-    key: tuple[str, ConfigurableClassData] | None
+    key: tuple[str, URL, ConfigurableClassData | None] | None
     monotonic_timestamp: float = dataclasses.field(default_factory=time.monotonic)
     alembic_counter: int = dataclasses.field(
         default_factory=lambda: int(Cache.global_alembic_counter)
@@ -145,7 +145,7 @@ class CacheData:
 
 class Cache:
     global_alembic_counter: ClassVar[int] = 0
-    _cache: dict[tuple[str, ConfigurableClassData], CacheData]
+    _cache: dict[tuple[str, URL, ConfigurableClassData | None], CacheData]
     _uncached: CacheData
     lock: threading.Lock
 
@@ -155,12 +155,10 @@ class Cache:
         self._uncached = CacheData(key=None)
         self.lock = threading.Lock()
 
-    def get(self, storage: ConfigurableClass | object) -> CacheData:
+    def get(self, url: URL, storage: ConfigurableClass | object) -> CacheData:
         if not isinstance(storage, ConfigurableClass):
             return self._uncached
-        # check
-        assert storage.inst_data
-        key = (storage.__class__.__name__, storage.inst_data)
+        key = (storage.__class__.__name__, url, storage.inst_data)
         data = self._cache.get(key)
         if data is not None:
             if (
@@ -177,43 +175,47 @@ class Cache:
         return data
 
     def get_table_names(
-        self, storage: ConfigurableClass | object, connect: ConnectionContextManager
+        self, url: URL, storage: ConfigurableClass | object, connect: ConnectionContextManager
     ) -> list[str]:
-        return self.get(storage).get_table_names(connect)
+        return self.get(url, storage).get_table_names(connect)
 
     def has_table(
         self,
         table_name: str,
+        url: URL,
         storage: ConfigurableClass | object,
         connect: ConnectionContextManager,
     ) -> bool:
-        return self.get(storage).has_table(table_name, connect)
+        return self.get(url, storage).has_table(table_name, connect)
 
     def get_columns(
         self,
         table_name: str,
+        url: URL,
         storage: ConfigurableClass | object,
         connect: ConnectionContextManager,
     ) -> list[str]:
-        return self.get(storage).get_columns(table_name, connect)
+        return self.get(url, storage).get_columns(table_name, connect)
 
     def get_indexes(
         self,
         table_name: str,
+        url: URL,
         storage: ConfigurableClass | object,
         connect: ConnectionContextManager,
     ) -> list[str]:
-        return self.get(storage).get_indexes(table_name, connect)
+        return self.get(url, storage).get_indexes(table_name, connect)
 
     def has_column(
         self,
         *,
         table_name: str,
         column_name: str,
+        url: URL,
         storage: ConfigurableClass | object,
         connect: ConnectionContextManager,
     ) -> bool:
-        return self.get(storage).has_column(
+        return self.get(url, storage).has_column(
             table_name=table_name,
             column_name=column_name,
             connect=connect,
@@ -224,10 +226,11 @@ class Cache:
         *,
         table_name: str,
         index_name: str,
+        url: URL,
         storage: ConfigurableClass | object,
         connect: ConnectionContextManager,
     ) -> bool:
-        return self.get(storage).has_index(
+        return self.get(url, storage).has_index(
             table_name=table_name, index_name=index_name, connect=connect
         )
 

@@ -25,7 +25,7 @@ from dagster._core.storage.sqlalchemy_compat import db_result
 from dagster._daemon.types import DaemonHeartbeat
 from dagster._serdes import ConfigurableClass, ConfigurableClassData, serialize_value
 from dagster._time import datetime_from_timestamp
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 from dagster_mysql.utils import (
     create_mysql_connection,
@@ -143,6 +143,10 @@ class MySQLRunStorage(SqlRunStorage, ConfigurableClass):
 
     def connect(self, run_id: str | None = None) -> ContextManager[Connection]:
         return create_mysql_connection(self._engine, __file__, "run")
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     def upgrade(self) -> None:
         alembic_config = mysql_alembic_config(__file__)

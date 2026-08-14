@@ -3,7 +3,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ContextManager  # noqa: UP035
 
 import dagster._check as check
-import sqlalchemy as db
 import sqlalchemy.dialects as db_dialects
 import sqlalchemy.pool as db_pool
 from dagster._config.config_schema import UserConfigSchema
@@ -20,6 +19,7 @@ from dagster._core.storage.sql import (
     AlembicVersion,
     check_alembic_revision,
     create_engine,
+    get_table_names,
     run_alembic_upgrade,
     stamp_alembic_rev,
 )
@@ -27,7 +27,7 @@ from dagster._daemon.types import DaemonHeartbeat
 from dagster._serdes import ConfigurableClass, ConfigurableClassData, serialize_value
 from dagster._time import datetime_from_timestamp
 from sqlalchemy import event
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 from dagster_postgres.utils import (
     create_pg_connection,
@@ -99,7 +99,9 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
         # Stamp and create tables if the main table does not exist (we can't check alembic
         # revision because alembic config may be shared with other storage classes)
         if self.should_autocreate_tables:
-            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+            table_names = retry_pg_connection_fn(
+                lambda: get_table_names(self._engine.url, self, self._engine.connect())
+            )
             if "runs" not in table_names:
                 retry_pg_creation_fn(self._init_db)
                 self.migrate()
@@ -170,6 +172,10 @@ class PostgresRunStorage(SqlRunStorage, ConfigurableClass):
 
     def connect(self) -> ContextManager[Connection]:
         return create_pg_connection(self._engine)
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     def upgrade(self) -> None:
         with self.connect() as conn:

@@ -26,7 +26,7 @@ from dagster._core.storage.sql import (
 from dagster._core.storage.sqlalchemy_compat import db_result
 from dagster._serdes import ConfigurableClass, ConfigurableClassData, serialize_value
 from dagster._time import get_current_datetime
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import URL, Connection
 
 from dagster_mysql.utils import (
     create_mysql_connection,
@@ -134,6 +134,10 @@ class MySQLScheduleStorage(SqlScheduleStorage, ConfigurableClass):
 
     def connect(self) -> ContextManager[Connection]:
         return create_mysql_connection(self._engine, __file__, "schedule")
+
+    @property
+    def url(self) -> URL:
+        return self._engine.url
 
     @property
     def supports_batch_queries(self) -> bool:

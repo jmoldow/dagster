@@ -16,7 +16,7 @@ import sqlalchemy as db
 import sqlalchemy.exc as db_exc
 from dagster_shared.serdes import deserialize_value
 from dagster_shared.serdes.errors import DeserializationError
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import URL, Connection, Engine
 from sqlalchemy.pool import NullPool
 from tqdm import tqdm
 from watchdog.events import FileSystemEvent, PatternMatchingEventHandler
@@ -112,12 +112,7 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         self._db_lock = threading.Lock()
 
         if not os.path.exists(self.path_for_shard(INDEX_SHARD_NAME)):
-            conn_string = self.conn_string_for_shard(INDEX_SHARD_NAME)
-            engine = create_engine(
-                conn_string,
-                poolclass=NullPool,
-                connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
-            )
+            engine = self._engine(INDEX_SHARD_NAME)
             self._initdb(engine, for_index_shard=True)
             self.reindex_events()
             self.reindex_assets()
@@ -162,13 +157,8 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         ]
 
     def has_table(self, table_name: str) -> bool:
-        conn_string = self.conn_string_for_shard(INDEX_SHARD_NAME)
-        engine = create_engine(
-            conn_string,
-            poolclass=NullPool,
-            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
-        )
-        return has_table(table_name, self, engine.connect())
+        engine = self._engine(INDEX_SHARD_NAME)
+        return has_table(table_name, engine.url, self, engine.connect())
 
     def path_for_shard(self, run_id: str) -> str:
         return os.path.join(self._base_dir, f"{run_id}.db")
@@ -231,15 +221,9 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
     @contextmanager
     def _connect(self, shard: str) -> Iterator[Connection]:
+        check.str_param(shard, "shard")
         with self._db_lock:
-            check.str_param(shard, "shard")
-
-            conn_string = self.conn_string_for_shard(shard)
-            engine = create_engine(
-                conn_string,
-                poolclass=NullPool,
-                connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
-            )
+            engine = self._engine(shard)
 
             if shard not in self._initialized_dbs:
                 self._initdb(engine)
@@ -250,11 +234,25 @@ class SqliteEventLogStorage(SqlEventLogStorage, ConfigurableClass):
                     yield conn
             engine.dispose()
 
+    def _engine(self, shard: str) -> Engine:
+        check.str_param(shard, "shard")
+
+        conn_string = self.conn_string_for_shard(shard)
+        return create_engine(
+            conn_string,
+            poolclass=NullPool,
+            connect_args={"timeout": SQLITE_BUSY_TIMEOUT_SECONDS},
+        )
+
     def run_connection(self, run_id: str | None = None) -> Any:
         return self._connect(run_id)  # type: ignore  # bad sig
 
     def index_connection(self) -> ContextManager[Connection]:
         return self._connect(INDEX_SHARD_NAME)
+
+    @property
+    def index_url(self) -> URL:
+        return self._engine(INDEX_SHARD_NAME).url
 
     def store_event(self, event: EventLogEntry) -> None:
         """Overridden method to replicate asset events in a central assets.db sqlite shard, enabling
